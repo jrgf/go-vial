@@ -1,4 +1,5 @@
 COVERAGE_MIN ?= 80
+COVERAGE_PROFILE ?= .vial/coverage.out
 GOEXE := $(shell go env GOEXE)
 VIAL_BIN ?= bin/vial$(GOEXE)
 
@@ -8,8 +9,9 @@ test:
 	go test ./...
 
 coverage:
-	go test -coverprofile=coverage.out ./...
-	@go tool cover -func=coverage.out | awk -v min="$(COVERAGE_MIN)" '/^total:/ { found=1; gsub(/%/, "", $$3); printf "coverage: %.1f%% (minimum %.1f%%)\n", $$3, min; if ($$3 + 0 < min) failed=1 } END { exit (!found || failed) }'
+	mkdir -p $(dir $(COVERAGE_PROFILE))
+	go test -coverprofile=$(COVERAGE_PROFILE) ./...
+	@go tool cover -func=$(COVERAGE_PROFILE) | awk -v min="$(COVERAGE_MIN)" '/^total:/ { found=1; gsub(/%/, "", $$3); printf "coverage: %.1f%% (minimum %.1f%%)\n", $$3, min; if ($$3 + 0 < min) failed=1 } END { exit (!found || failed) }'
 
 race:
 	go test -race ./...

@@ -203,10 +203,8 @@ func (app *App) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	app.mu.RLock()
 	root := app.compiledRoot
 	errorHandler := app.errorHandler
-	app.mu.RUnlock()
 
 	response := newResponseWriter(writer)
 	contextValue := newContext(app, response, request)

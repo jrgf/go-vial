@@ -23,7 +23,7 @@ func StartProcess(config Config, executable string) (*Process, error) {
 	// graceful interrupt and only kill after the restart timeout.
 	command := exec.Command(executable, config.AppArgs...)
 	command.Dir = config.Root
-	command.Env = setEnvironment(config.Env, "VIAL_ENV", "development")
+	command.Env = append(config.Env, "VIAL_ENV=development")
 	command.Stdin = config.Stdin
 	command.Stdout = config.Stdout
 	command.Stderr = config.Stderr
@@ -84,24 +84,4 @@ func (process *Process) Stop(timeout time.Duration) error {
 	case <-time.After(timeout):
 		return errors.New("application process did not exit after kill")
 	}
-}
-
-func setEnvironment(environment []string, key, value string) []string {
-	prefix := key + "="
-	result := make([]string, 0, len(environment)+1)
-	replaced := false
-	for _, item := range environment {
-		if len(item) >= len(prefix) && item[:len(prefix)] == prefix {
-			if !replaced {
-				result = append(result, prefix+value)
-				replaced = true
-			}
-			continue
-		}
-		result = append(result, item)
-	}
-	if !replaced {
-		result = append(result, prefix+value)
-	}
-	return result
 }

@@ -1,3 +1,9 @@
+
+> [!WARNING]
+> This is a learning/pet project  in which I have used AI. If you are uncomfortable with the use of AI this is not the place for you. Of course there will be slop in places I tried to erradicate the most of it,but surely there is.
+> My solely goal with this project is to level up in Go and create a light and easy framework to create web apps. If you feel this suits your needs feel free to use it and contribute to the project
+
+
 # vial
 
 `vial` is an early Go web-framework MVP focused on two things:
@@ -290,7 +296,6 @@ The codebase is also compile-checked for Windows and macOS in CI.
 - Windows child replacement uses direct termination; graceful console-event delivery is a later enhancement.
 - Framework errors are JSON, while unmatched `ServeMux` `404`/`405` responses still use standard-library formatting.
 - Route registration becomes immutable after the application is built or first served.
-- The placeholder module path must be renamed before publishing.
 
 ## Next iteration
 
@@ -303,6 +308,10 @@ The next milestone should harden the existing surface rather than add major feat
 5. Add a test client with JSON convenience methods.
 
 Background tasks, realtime transports, and first-class gRPC integration remain planned later, once this HTTP and lifecycle kernel has a stable API.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, quality requirements, and pull request guidance.
 
 ## License
 

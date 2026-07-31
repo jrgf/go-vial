@@ -40,16 +40,3 @@ func TestRelevantSource(t *testing.T) {
 		}
 	}
 }
-
-func TestSetEnvironmentReplacesExistingValue(t *testing.T) {
-	environment := setEnvironment([]string{"A=1", "VIAL_ENV=production", "B=2"}, "VIAL_ENV", "development")
-	want := []string{"A=1", "VIAL_ENV=development", "B=2"}
-	if len(environment) != len(want) {
-		t.Fatalf("unexpected environment length: %#v", environment)
-	}
-	for index := range want {
-		if environment[index] != want[index] {
-			t.Fatalf("environment[%d] = %q, want %q", index, environment[index], want[index])
-		}
-	}
-}
