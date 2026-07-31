@@ -1,0 +1,10 @@
+.vial/
+bin/
+coverage.out
+coverage.html
+*.test
+*.exe
+*.prof
+.DS_Store
+.idea/
+.vscode/
