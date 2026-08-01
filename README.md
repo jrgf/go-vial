@@ -6,6 +6,8 @@
 
 # vial
 
+[![CI](https://github.com/jrgf/go-vial/actions/workflows/ci.yml/badge.svg)](https://github.com/jrgf/go-vial/actions/workflows/ci.yml)
+
 `vial` is an early Go web-framework MVP focused on two things:
 
 1. A small, explicit HTTP API built directly on `net/http`.
