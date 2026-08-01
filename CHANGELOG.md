@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.1.0-dev
+## 0.1.0
 
-Initial vertical slice:
+Initial vertical slice of the project:
 
 - HTTP application and context
 - Method-aware routing and groups

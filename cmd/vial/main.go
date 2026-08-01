@@ -11,7 +11,7 @@ import (
 	"github.com/jrgf/go-vial/internal/dev"
 )
 
-var version = "0.1.0-dev"
+var version = "0.1.0"
 
 type stringList []string
 
