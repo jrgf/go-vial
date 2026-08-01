@@ -66,6 +66,13 @@ Keep unrelated refactors out of the same pull request. New dependencies, public 
 
 Include the Vial version, Go version, operating system, minimal reproduction, expected behavior, and actual behavior.
 
+## Releases
+
+The value printed by `vial version` is the release source of truth. After that
+version and the changelog are updated, successful CI on `main` creates the tag,
+release title, notes, and binaries unless that version is already published.
+Published versions are never overwritten.
+
 ## License
 
 By contributing, you agree that your contribution is licensed under the repository's MIT License.

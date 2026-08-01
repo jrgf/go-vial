@@ -10,6 +10,26 @@ import (
 
 type requestContextKey struct{}
 
+type routeMissWriter struct {
+	header http.Header
+	status int
+}
+
+func (writer *routeMissWriter) Header() http.Header {
+	return writer.header
+}
+
+func (writer *routeMissWriter) WriteHeader(status int) {
+	if writer.status == 0 {
+		writer.status = status
+	}
+}
+
+func (writer *routeMissWriter) Write(body []byte) (int, error) {
+	writer.WriteHeader(http.StatusOK)
+	return len(body), nil
+}
+
 // App is the framework application and implements http.Handler.
 type App struct {
 	mu sync.RWMutex
@@ -178,6 +198,9 @@ func (app *App) Build() error {
 			contextValue,
 		)
 		contextValue.request = contextValue.request.WithContext(requestContext)
+		if err := routeMiss(mux, contextValue.request); err != nil {
+			return err
+		}
 		mux.ServeHTTP(contextValue.response, contextValue.request)
 		return contextValue.routeErr
 	}
@@ -213,6 +236,23 @@ func safeMuxHandle(mux *http.ServeMux, pattern string, handler http.Handler) (er
 	return nil
 }
 
+func routeMiss(mux *http.ServeMux, request *http.Request) *HTTPError {
+	handler, pattern := mux.Handler(request)
+	if pattern != "" {
+		return nil
+	}
+
+	probe := &routeMissWriter{header: make(http.Header)}
+	handler.ServeHTTP(probe, request)
+	if probe.status == http.StatusMethodNotAllowed {
+		err := MethodNotAllowed("method_not_allowed", http.StatusText(http.StatusMethodNotAllowed))
+		err.Headers = make(http.Header)
+		err.Headers.Set("Allow", probe.header.Get("Allow"))
+		return err
+	}
+	return NotFound("not_found", http.StatusText(http.StatusNotFound))
+}
+
 func (app *App) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if err := app.Build(); err != nil {
 		app.config.logger.Error("framework build failed", "error", err)
@@ -226,6 +266,7 @@ func (app *App) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	response := newResponseWriter(writer)
 	contextValue := newContext(app, response, request)
 	if err := root(contextValue); err != nil {
+		applyHTTPErrorHeaders(contextValue, err)
 		errorHandler(contextValue, err)
 	}
 }

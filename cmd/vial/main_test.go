@@ -65,9 +65,10 @@ func TestRunRoutes(t *testing.T) {
 		t.Fatalf("decode routes: %v", err)
 	}
 	want := []vial.Route{
-		{Method: "GET", Path: "/", Pattern: "GET /"},
+		{Method: "GET", Path: "/", Pattern: "GET /{$}"},
 		{Method: "GET", Path: "/users/{id}", Pattern: "GET /users/{id}"},
 		{Method: "GET", Path: "/search", Pattern: "GET /search"},
+		{Method: "POST", Path: "/submit", Pattern: "POST /submit"},
 	}
 	if !reflect.DeepEqual(routes, want) {
 		t.Fatalf("routes = %#v, want %#v", routes, want)

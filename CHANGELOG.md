@@ -4,6 +4,8 @@
 
 - Read-only route catalog through `App.Routes`
 - Route inspection through `vial routes` and `vial routes --json`
+- Framework-owned `404` and `405` errors with native `Allow` headers
+- Exact Vial root and trailing-slash routes instead of `ServeMux` catch-alls
 
 ## 0.1.0
 

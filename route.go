@@ -23,6 +23,9 @@ func routePattern(method, path string) string {
 	if method == "" {
 		return path
 	}
+	if strings.HasSuffix(path, "/") {
+		path += "{$}"
+	}
 	return strings.ToUpper(method) + " " + path
 }
 

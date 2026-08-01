@@ -60,6 +60,10 @@ func NotFound(code, message string) *HTTPError {
 	return NewHTTPError(http.StatusNotFound, code, message)
 }
 
+func MethodNotAllowed(code, message string) *HTTPError {
+	return NewHTTPError(http.StatusMethodNotAllowed, code, message)
+}
+
 func Conflict(code, message string) *HTTPError {
 	return NewHTTPError(http.StatusConflict, code, message)
 }
@@ -90,6 +94,16 @@ func StatusCode(err error) int {
 	return http.StatusInternalServerError
 }
 
+func applyHTTPErrorHeaders(context *Context, err error) {
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		return
+	}
+	for key, values := range httpErr.Headers {
+		context.response.Header()[key] = append([]string(nil), values...)
+	}
+}
+
 func defaultErrorHandler(context *Context, err error) {
 	if context.Committed() {
 		context.Logger().Error("handler failed after response was committed", "error", err)
@@ -110,11 +124,6 @@ func defaultErrorHandler(context *Context, err error) {
 		}
 		if httpErr.Message != "" {
 			message = httpErr.Message
-		}
-		for key, values := range httpErr.Headers {
-			for _, value := range values {
-				context.response.Header().Add(key, value)
-			}
 		}
 	}
 

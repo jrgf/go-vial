@@ -51,5 +51,9 @@ func newApp() *vial.App {
 			"query": context.Query("q"),
 		})
 	})
+
+	app.Post("/submit", func(context *vial.Context) error {
+		return context.NoContent(http.StatusNoContent)
+	})
 	return app
 }

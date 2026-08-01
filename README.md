@@ -179,6 +179,8 @@ Default response:
 ```
 
 Unexpected errors are rendered as a generic `500` response. Their internal details remain in server logs.
+Unmatched routes and unsupported methods use the same error handler and return
+`not_found` and `method_not_allowed` codes; `405` responses include `Allow`.
 
 ## Mount standard handlers
 
@@ -304,7 +306,6 @@ The codebase is also compile-checked for Windows and macOS in CI.
 - Development change detection uses recursive polling rather than native filesystem events.
 - Only Go source and module/workspace files trigger rebuilds.
 - Windows child replacement uses direct termination; graceful console-event delivery is a later enhancement.
-- Framework errors are JSON, while unmatched `ServeMux` `404`/`405` responses still use standard-library formatting.
 - Route registration becomes immutable after the application is built or first served.
 
 ## Contributing

@@ -105,6 +105,108 @@ func TestHTTPErrorRendering(t *testing.T) {
 	}
 }
 
+func TestRoutingErrorsUseFrameworkErrorHandler(t *testing.T) {
+	app := vial.New()
+	app.Get("/", func(*vial.Context) error { return nil })
+	app.Get("/users/{id}", func(*vial.Context) error { return nil })
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+		wantCode   string
+		wantAllow  string
+	}{
+		{"not found", http.MethodGet, "/missing", http.StatusNotFound, "not_found", ""},
+		{"method not allowed", http.MethodPost, "/users/42", http.StatusMethodNotAllowed, "method_not_allowed", "GET, HEAD"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			app.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
+			if response.Code != test.wantStatus || response.Header().Get("Allow") != test.wantAllow {
+				t.Fatalf("status=%d allow=%q", response.Code, response.Header().Get("Allow"))
+			}
+			if !strings.Contains(response.Body.String(), `"code":"`+test.wantCode+`"`) {
+				t.Fatalf("unexpected error body %s", response.Body.String())
+			}
+		})
+	}
+}
+
+func TestRoutingErrorCanBeCustomized(t *testing.T) {
+	app := vial.New()
+	app.Get("/users", func(*vial.Context) error { return nil })
+
+	var handled *vial.HTTPError
+	var routeWasNil bool
+	app.SetErrorHandler(func(context *vial.Context, err error) {
+		routeWasNil = context.Route() == nil
+		if !errors.As(err, &handled) {
+			t.Errorf("error is %T, want *vial.HTTPError", err)
+		}
+		context.Response().Header().Set("X-Custom-Error", "true")
+		_ = context.Text(http.StatusTeapot, "custom")
+	})
+
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/users", nil))
+	if handled == nil || handled.Status != http.StatusMethodNotAllowed || handled.Headers.Get("Allow") != "GET, HEAD" {
+		t.Fatalf("unexpected handled error %#v", handled)
+	}
+	if !routeWasNil || response.Code != http.StatusTeapot || response.Body.String() != "custom" {
+		t.Fatalf("unexpected custom response: routeNil=%t status=%d body=%q", routeWasNil, response.Code, response.Body.String())
+	}
+	if response.Header().Get("Allow") != "GET, HEAD" || response.Header().Get("X-Custom-Error") != "true" {
+		t.Fatalf("unexpected headers %v", response.Header())
+	}
+}
+
+func TestRoutingPreservesServeMuxBehavior(t *testing.T) {
+	app := vial.New()
+	app.Get("/files/{path...}", func(context *vial.Context) error {
+		return context.Text(http.StatusOK, context.Param("path"))
+	})
+	app.Get("/tree/", func(context *vial.Context) error {
+		return context.Text(http.StatusOK, "tree")
+	})
+	app.HandleHTTP("GET example.com/host", http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(writer, "host")
+	}))
+	app.HandleHTTP("/raw", http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(writer, "raw")
+	}))
+
+	tests := []struct {
+		name         string
+		method       string
+		target       string
+		wantStatus   int
+		wantBody     string
+		wantLocation string
+	}{
+		{"wildcard", http.MethodGet, "/files/a/b", http.StatusOK, "a/b", ""},
+		{"head", http.MethodHead, "/files/a/b", http.StatusOK, "", ""},
+		{"redirect", http.MethodGet, "/tree", http.StatusMovedPermanently, "", "/tree/"},
+		{"trailing slash is exact", http.MethodGet, "/tree/child", http.StatusNotFound, "", ""},
+		{"host", http.MethodGet, "http://example.com/host", http.StatusOK, "host", ""},
+		{"methodless raw handler", http.MethodPost, "/raw", http.StatusOK, "raw", ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			app.ServeHTTP(response, httptest.NewRequest(test.method, test.target, nil))
+			if response.Code != test.wantStatus || response.Header().Get("Location") != test.wantLocation {
+				t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
+			}
+			if test.wantBody != "" && response.Body.String() != test.wantBody {
+				t.Fatalf("body=%q, want %q", response.Body.String(), test.wantBody)
+			}
+		})
+	}
+}
+
 func TestBindJSON(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -485,10 +587,11 @@ func TestHTTPErrorHelpers(t *testing.T) {
 	errorsByStatus := []error{
 		vial.Unauthorized("unauthorized", "unauthorized"),
 		vial.Forbidden("forbidden", "forbidden"),
+		vial.MethodNotAllowed("method_not_allowed", "method not allowed"),
 		vial.Conflict("conflict", "conflict"),
 		vial.InternalServerError(cause),
 	}
-	wantStatuses := []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusInternalServerError}
+	wantStatuses := []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusMethodNotAllowed, http.StatusConflict, http.StatusInternalServerError}
 	for index, err := range errorsByStatus {
 		if got := vial.StatusCode(err); got != wantStatuses[index] {
 			t.Errorf("StatusCode(%v) = %d, want %d", err, got, wantStatuses[index])
