@@ -162,6 +162,30 @@ app := vial.New(
 and `form` with JSON or form bodies. Uploaded files use `Context.FormFile`; see
 the runnable [`examples/upload`](examples/upload).
 
+## HTML templates
+
+Keeps the parsing in `html/template`; `render` buffers the result before committing
+the response:
+
+```go
+parsed, err := template.ParseFS(webFS, "templates/*.html")
+if err != nil {
+    return err
+}
+views := render.New(parsed)
+
+app.Get("/", func(c *vial.Context) error {
+    return views.HTML(c, http.StatusOK, "home", page)
+})
+```
+
+The runnable [`examples/web`](examples/web) uses `embed.FS` and the native
+`http.FileServerFS` for static assets:
+
+```bash
+vial dev ./examples/web
+```
+
 ## Testing
 
 `testkit` runs the full application lifecycle and cleans up automatically:

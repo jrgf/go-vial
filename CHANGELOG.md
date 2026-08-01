@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+- Buffered `html/template` rendering with named templates and safe error propagation
+- Embedded static assets through native `http.FileServerFS` integration
+- Runnable server-rendered web example with contextual escaping
+
 ## 0.7.0
 
 - Named `App.Go` background tasks with build-time validation and lifecycle-managed cancellation
