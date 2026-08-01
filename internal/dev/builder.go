@@ -39,7 +39,9 @@ func (builder *Builder) Build(contextValue context.Context) (string, error) {
 	}
 	outputPath := filepath.Join(outputDirectory, executableName)
 
-	fmt.Fprintf(builder.config.Stdout, "[vial] building %s\n", builder.config.Target)
+	if _, err := fmt.Fprintf(builder.config.Stdout, "[vial] building %s\n", builder.config.Target); err != nil {
+		return "", fmt.Errorf("write build status: %w", err)
+	}
 	command := exec.CommandContext(
 		contextValue,
 		"go",
@@ -58,6 +60,9 @@ func (builder *Builder) Build(contextValue context.Context) (string, error) {
 		return "", fmt.Errorf("go build: %w", err)
 	}
 
-	fmt.Fprintln(builder.config.Stdout, "[vial] build successful")
+	if _, err := fmt.Fprintln(builder.config.Stdout, "[vial] build successful"); err != nil {
+		_ = os.Remove(outputPath)
+		return "", fmt.Errorf("write build status: %w", err)
+	}
 	return outputPath, nil
 }

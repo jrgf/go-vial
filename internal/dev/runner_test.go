@@ -26,9 +26,15 @@ func TestRunnerDoesNotStartProcessWhenBuildFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runner: %v", err)
 	}
-	defer runner.watcher.Close()
+	t.Cleanup(func() {
+		if err := runner.watcher.Close(); err != nil {
+			t.Errorf("close watcher: %v", err)
+		}
+	})
 
-	runner.rebuildAndSwap(context.Background())
+	if err := runner.rebuildAndSwap(context.Background()); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
 	if runner.process != nil {
 		t.Fatal("expected failed build not to start a process")
 	}
@@ -67,7 +73,11 @@ func main() {
 	if err != nil {
 		t.Fatalf("create runner log: %v", err)
 	}
-	defer output.Close()
+	t.Cleanup(func() {
+		if err := output.Close(); err != nil {
+			t.Errorf("close runner log: %v", err)
+		}
+	})
 
 	runner, err := NewRunner(Config{
 		Root:           root,

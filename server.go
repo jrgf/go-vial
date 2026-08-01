@@ -41,11 +41,15 @@ func (app *App) Run(contextValue context.Context, address string) error {
 
 // Serve runs the application on an existing listener. This is useful for tests
 // and for callers that need custom listener configuration.
-func (app *App) Serve(contextValue context.Context, listener net.Listener) error {
+func (app *App) Serve(contextValue context.Context, listener net.Listener) (serveErr error) {
 	if contextValue == nil {
 		contextValue = context.Background()
 	}
-	defer listener.Close()
+	defer func() {
+		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			serveErr = errors.Join(serveErr, fmt.Errorf("close listener: %w", err))
+		}
+	}()
 
 	runContext, stopSignals := signal.NotifyContext(contextValue, shutdownSignals()...)
 	defer stopSignals()

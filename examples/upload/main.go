@@ -30,7 +30,9 @@ func newApp() *vial.App {
 		if err != nil {
 			return err
 		}
-		defer file.Close()
+		if err := file.Close(); err != nil {
+			return err
+		}
 
 		return context.JSON(http.StatusCreated, map[string]any{
 			"title":    form.Title,

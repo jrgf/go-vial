@@ -306,9 +306,12 @@ func TestBindMultipartAndFormFile(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		defer file.Close()
 		content, err := io.ReadAll(file)
 		if err != nil {
+			_ = file.Close()
+			return err
+		}
+		if err := file.Close(); err != nil {
 			return err
 		}
 		return context.JSON(http.StatusOK, map[string]any{
@@ -442,7 +445,9 @@ func uploadApp(options ...vial.Option) *vial.App {
 		if err != nil {
 			return err
 		}
-		defer file.Close()
+		if err := file.Close(); err != nil {
+			return err
+		}
 		return context.NoContent(http.StatusNoContent)
 	})
 	return app

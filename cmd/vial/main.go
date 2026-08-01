@@ -74,7 +74,7 @@ func runDev(arguments []string) error {
 	flags.Var(&excludes, "exclude", "additional directory or path to ignore; repeatable")
 
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "Usage: vial dev [flags] [package] [-- application arguments]")
+		_, _ = fmt.Fprintln(flags.Output(), "Usage: vial dev [flags] [package] [-- application arguments]")
 		flags.PrintDefaults()
 	}
 
@@ -118,7 +118,7 @@ func runRoutes(arguments []string, output io.Writer) error {
 	flags.SetOutput(os.Stderr)
 	jsonOutput := flags.Bool("json", false, "print routes as JSON")
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "Usage: vial routes [--json] [package] [-- application arguments]")
+		_, _ = fmt.Fprintln(flags.Output(), "Usage: vial routes [--json] [package] [-- application arguments]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(frameworkArguments); err != nil {
@@ -138,7 +138,7 @@ func runRoutes(arguments []string, output io.Writer) error {
 		return fmt.Errorf("create route output: %w", err)
 	}
 	outputPath := temporary.Name()
-	defer os.Remove(outputPath)
+	defer func() { _ = os.Remove(outputPath) }()
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close route output: %w", err)
 	}
@@ -175,7 +175,9 @@ func writeRoutes(output io.Writer, routes []vial.Route, jsonOutput bool) error {
 	}
 
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "METHOD\tPATH\tNAME\tMODULE")
+	if _, err := fmt.Fprintln(table, "METHOD\tPATH\tNAME\tMODULE"); err != nil {
+		return fmt.Errorf("write route table: %w", err)
+	}
 	for _, route := range routes {
 		method := route.Method
 		if method == "" {
@@ -189,7 +191,9 @@ func writeRoutes(output io.Writer, routes []vial.Route, jsonOutput bool) error {
 		if module == "" {
 			module = "-"
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", method, route.Path, name, module)
+		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", method, route.Path, name, module); err != nil {
+			return fmt.Errorf("write route table: %w", err)
+		}
 	}
 	return table.Flush()
 }

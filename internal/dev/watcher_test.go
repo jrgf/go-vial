@@ -13,7 +13,11 @@ func TestWatcherReportsGoSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new watcher: %v", err)
 	}
-	defer watcher.Close()
+	t.Cleanup(func() {
+		if err := watcher.Close(); err != nil {
+			t.Errorf("close watcher: %v", err)
+		}
+	})
 
 	path := filepath.Join(root, "main.go")
 	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {

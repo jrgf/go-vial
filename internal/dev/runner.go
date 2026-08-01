@@ -2,7 +2,9 @@ package dev
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 )
@@ -33,12 +35,20 @@ func NewRunner(config Config) (*Runner, error) {
 	}, nil
 }
 
-func (runner *Runner) Run(contextValue context.Context) error {
-	defer runner.watcher.Close()
-	defer runner.stopCurrent()
+func (runner *Runner) Run(contextValue context.Context) (runErr error) {
+	defer func() {
+		runErr = errors.Join(runErr, runner.watcher.Close())
+	}()
+	defer func() {
+		runErr = errors.Join(runErr, runner.stopCurrent())
+	}()
 
-	fmt.Fprintf(runner.config.Stdout, "[vial] watching %s\n", runner.config.Root)
-	runner.rebuildAndSwap(contextValue)
+	if _, err := fmt.Fprintf(runner.config.Stdout, "[vial] watching %s\n", runner.config.Root); err != nil {
+		return fmt.Errorf("write runner status: %w", err)
+	}
+	if err := runner.rebuildAndSwap(contextValue); err != nil {
+		return err
+	}
 
 	var debounceTimer *time.Timer
 	var debounceChannel <-chan time.Time
@@ -55,7 +65,9 @@ func (runner *Runner) Run(contextValue context.Context) error {
 				return nil
 			}
 			if runner.config.Verbose {
-				fmt.Fprintf(runner.config.Stdout, "[vial] change detected: %s\n", change.Path)
+				if _, err := fmt.Fprintf(runner.config.Stdout, "[vial] change detected: %s\n", change.Path); err != nil {
+					return fmt.Errorf("write runner status: %w", err)
+				}
 			}
 			if debounceTimer == nil {
 				debounceTimer = time.NewTimer(runner.config.Debounce)
@@ -72,20 +84,30 @@ func (runner *Runner) Run(contextValue context.Context) error {
 
 		case <-debounceChannel:
 			debounceChannel = nil
-			fmt.Fprintln(runner.config.Stdout, "[vial] source change detected; rebuilding")
-			runner.rebuildAndSwap(contextValue)
+			if _, err := fmt.Fprintln(runner.config.Stdout, "[vial] source change detected; rebuilding"); err != nil {
+				return fmt.Errorf("write runner status: %w", err)
+			}
+			if err := runner.rebuildAndSwap(contextValue); err != nil {
+				return err
+			}
 
 		case err, ok := <-runner.watcher.Errors():
 			if ok && err != nil {
-				fmt.Fprintf(runner.config.Stderr, "[vial] watcher error: %v\n", err)
+				if _, writeErr := fmt.Fprintf(runner.config.Stderr, "[vial] watcher error: %v\n", err); writeErr != nil {
+					return fmt.Errorf("write runner error: %w", writeErr)
+				}
 			}
 
 		case <-processDone:
 			err := runner.process.Err()
 			if err != nil {
-				fmt.Fprintf(runner.config.Stderr, "[vial] application exited: %v\n", err)
+				if _, writeErr := fmt.Fprintf(runner.config.Stderr, "[vial] application exited: %v\n", err); writeErr != nil {
+					return fmt.Errorf("write runner error: %w", writeErr)
+				}
 			} else {
-				fmt.Fprintln(runner.config.Stdout, "[vial] application exited")
+				if _, writeErr := fmt.Fprintln(runner.config.Stdout, "[vial] application exited"); writeErr != nil {
+					return fmt.Errorf("write runner status: %w", writeErr)
+				}
 			}
 			exitedBinary := runner.processBinary
 			runner.process = nil
@@ -97,25 +119,32 @@ func (runner *Runner) Run(contextValue context.Context) error {
 	}
 }
 
-func (runner *Runner) rebuildAndSwap(contextValue context.Context) {
+func (runner *Runner) rebuildAndSwap(contextValue context.Context) error {
+	var outputErr error
+	write := func(writer io.Writer, format string, arguments ...any) {
+		if _, err := fmt.Fprintf(writer, format, arguments...); err != nil {
+			outputErr = errors.Join(outputErr, fmt.Errorf("write runner output: %w", err))
+		}
+	}
+
 	candidate, err := runner.builder.Build(contextValue)
 	if err != nil {
-		fmt.Fprintf(
+		write(
 			runner.config.Stderr,
 			"[vial] build failed; last successful application remains running: %v\n",
 			err,
 		)
-		return
+		return outputErr
 	}
 
 	oldProcess := runner.process
 	oldBinary := runner.processBinary
 	if oldProcess != nil {
-		fmt.Fprintln(runner.config.Stdout, "[vial] stopping previous application")
+		write(runner.config.Stdout, "[vial] stopping previous application\n")
 		if err := oldProcess.Stop(runner.config.RestartTimeout); err != nil {
-			fmt.Fprintf(runner.config.Stderr, "[vial] could not stop previous application: %v\n", err)
+			write(runner.config.Stderr, "[vial] could not stop previous application: %v\n", err)
 			_ = os.Remove(candidate)
-			return
+			return outputErr
 		}
 		runner.process = nil
 		runner.processBinary = ""
@@ -123,29 +152,30 @@ func (runner *Runner) rebuildAndSwap(contextValue context.Context) {
 
 	process, err := StartProcess(runner.config, candidate)
 	if err != nil {
-		fmt.Fprintf(runner.config.Stderr, "[vial] could not start new application: %v\n", err)
+		write(runner.config.Stderr, "[vial] could not start new application: %v\n", err)
 		_ = os.Remove(candidate)
 
 		if oldBinary != "" {
-			fmt.Fprintln(runner.config.Stderr, "[vial] attempting to restore previous application")
+			write(runner.config.Stderr, "[vial] attempting to restore previous application\n")
 			restored, restoreErr := StartProcess(runner.config, oldBinary)
 			if restoreErr != nil {
-				fmt.Fprintf(runner.config.Stderr, "[vial] restore failed: %v\n", restoreErr)
-				return
+				write(runner.config.Stderr, "[vial] restore failed: %v\n", restoreErr)
+				return outputErr
 			}
 			runner.process = restored
 			runner.processBinary = oldBinary
 		}
-		return
+		return outputErr
 	}
 
 	runner.process = process
 	runner.processBinary = candidate
-	fmt.Fprintln(runner.config.Stdout, "[vial] application started")
+	write(runner.config.Stdout, "[vial] application started\n")
 
 	if oldBinary != "" && oldBinary != candidate {
 		_ = os.Remove(oldBinary)
 	}
+	return outputErr
 }
 
 func (runner *Runner) processDone() <-chan struct{} {
@@ -155,17 +185,24 @@ func (runner *Runner) processDone() <-chan struct{} {
 	return runner.process.Done()
 }
 
-func (runner *Runner) stopCurrent() {
+func (runner *Runner) stopCurrent() error {
 	if runner.process == nil {
-		return
+		return nil
 	}
-	fmt.Fprintln(runner.config.Stdout, "[vial] stopping application")
+	var stopErr error
+	if _, err := fmt.Fprintln(runner.config.Stdout, "[vial] stopping application"); err != nil {
+		stopErr = errors.Join(stopErr, fmt.Errorf("write runner status: %w", err))
+	}
 	if err := runner.process.Stop(runner.config.RestartTimeout); err != nil {
-		fmt.Fprintf(runner.config.Stderr, "[vial] stop failed: %v\n", err)
+		stopErr = errors.Join(stopErr, fmt.Errorf("stop application: %w", err))
+		if _, writeErr := fmt.Fprintf(runner.config.Stderr, "[vial] stop failed: %v\n", err); writeErr != nil {
+			stopErr = errors.Join(stopErr, fmt.Errorf("write runner error: %w", writeErr))
+		}
 	}
 	if runner.processBinary != "" {
 		_ = os.Remove(runner.processBinary)
 	}
 	runner.process = nil
 	runner.processBinary = ""
+	return stopErr
 }
