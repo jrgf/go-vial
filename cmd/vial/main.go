@@ -175,7 +175,7 @@ func writeRoutes(output io.Writer, routes []vial.Route, jsonOutput bool) error {
 	}
 
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "METHOD\tPATH\tNAME")
+	fmt.Fprintln(table, "METHOD\tPATH\tNAME\tMODULE")
 	for _, route := range routes {
 		method := route.Method
 		if method == "" {
@@ -185,7 +185,11 @@ func writeRoutes(output io.Writer, routes []vial.Route, jsonOutput bool) error {
 		if name == "" {
 			name = "-"
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\n", method, route.Path, name)
+		module := route.Module
+		if module == "" {
+			module = "-"
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", method, route.Path, name, module)
 	}
 	return table.Flush()
 }

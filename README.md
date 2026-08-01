@@ -17,6 +17,7 @@
 - Standard Go middleware composition
 - Named, method-aware routes and path parameters through `http.ServeMux`
 - Route groups with scoped middleware
+- Named application modules with isolated route registrars
 - JSON, text, redirects, and empty responses
 - Query, form, multipart, and strict JSON binding with body limits
 - Centralized structured error responses

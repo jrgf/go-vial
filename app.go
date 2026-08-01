@@ -36,6 +36,7 @@ type App struct {
 
 	config       config
 	routes       []routeDefinition
+	modules      []string
 	middleware   []Middleware
 	errorHandler ErrorHandler
 	built        bool
@@ -157,12 +158,25 @@ func (app *App) Build() error {
 	app.built = true
 
 	mux := http.NewServeMux()
+	moduleNames := make(map[string]struct{}, len(app.modules))
+	for _, name := range app.modules {
+		if !validRegistrationName(name) {
+			app.buildErr = fmt.Errorf("invalid module name %q", name)
+			return app.buildErr
+		}
+		if _, exists := moduleNames[name]; exists {
+			app.buildErr = fmt.Errorf("duplicate module name %q", name)
+			return app.buildErr
+		}
+		moduleNames[name] = struct{}{}
+	}
+
 	names := make(map[string]Route)
 	for index := range app.routes {
 		definition := app.routes[index]
 		route := definition.route
 		if definition.hasName {
-			if route.Name == "" || route.Name != strings.TrimSpace(route.Name) || strings.ContainsAny(route.Name, "\r\n\t") {
+			if !validRegistrationName(route.Name) {
 				app.buildErr = fmt.Errorf("route %q has invalid name %q", route.Pattern, route.Name)
 				return app.buildErr
 			}

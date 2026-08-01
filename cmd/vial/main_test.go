@@ -78,13 +78,13 @@ func TestRunRoutes(t *testing.T) {
 func TestWriteRoutesTable(t *testing.T) {
 	var output bytes.Buffer
 	err := writeRoutes(&output, []vial.Route{
-		{Method: "GET", Path: "/users", Name: "users.index"},
+		{Method: "GET", Path: "/users", Name: "users.index", Module: "users"},
 		{Path: "GET /health"},
 	}, false)
 	if err != nil {
 		t.Fatalf("write routes: %v", err)
 	}
-	for _, value := range []string{"METHOD", "PATH", "NAME", "GET", "/users", "users.index", "*", "GET /health", "-"} {
+	for _, value := range []string{"METHOD", "PATH", "NAME", "MODULE", "GET", "/users", "users.index", "users", "*", "GET /health", "-"} {
 		if !strings.Contains(output.String(), value) {
 			t.Errorf("table does not contain %q: %q", value, output.String())
 		}

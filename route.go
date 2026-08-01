@@ -11,6 +11,7 @@ type Route struct {
 	Path    string
 	Pattern string
 	Name    string
+	Module  string
 }
 
 // RouteOption configures route metadata.
@@ -41,6 +42,10 @@ func newRouteDefinition(route Route, options []RouteOption) routeDefinition {
 		}
 	}
 	return definition
+}
+
+func validRegistrationName(name string) bool {
+	return name != "" && name == strings.TrimSpace(name) && !strings.ContainsAny(name, "\r\n\t")
 }
 
 func routePattern(method, path string) string {

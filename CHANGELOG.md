@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Named route metadata with build-time duplicate validation and CLI output
+- Atomic module registration with middleware, groups, route ownership, and validation
 
 ## 0.3.0
 
