@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+
+- Named `App.Go` background tasks with build-time validation and lifecycle-managed cancellation
+- Critical and non-critical failure policies with panic recovery and named error propagation
+- Deadline-bound task shutdown with runnable heartbeat and in-memory event queue examples
+
 ## 0.6.0
 
 - Lifecycle-aware `testkit` server with automatic cleanup and a cookie-aware HTTP client
