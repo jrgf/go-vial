@@ -18,8 +18,14 @@ func TestModuleExample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routes) != 3 || routes[0].Module != "greetings" || routes[1].Module != "greetings" || routes[2].Module != "health" {
-		t.Fatalf("unexpected routes: %#v", routes)
+	wantModules := []string{"greetings", "greetings", "health"}
+	if len(routes) != len(wantModules) {
+		t.Fatalf("got %d routes, want %d: %#v", len(routes), len(wantModules), routes)
+	}
+	for index, want := range wantModules {
+		if routes[index].Module != want {
+			t.Errorf("route %d module = %q, want %q", index, routes[index].Module, want)
+		}
 	}
 
 	response := httptest.NewRecorder()
