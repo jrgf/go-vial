@@ -6,10 +6,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/jrgf/go-vial"
 )
 
 func TestExampleRoutes(t *testing.T) {
-	app := newApp()
+	app := testApp(t)
 	tests := []struct {
 		path string
 		key  string
@@ -35,7 +37,7 @@ func TestExampleRoutes(t *testing.T) {
 
 func TestExampleUnknownRoute(t *testing.T) {
 	response := httptest.NewRecorder()
-	newApp().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/missing", nil))
+	testApp(t).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/missing", nil))
 	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"not_found"`) {
 		t.Fatalf("unexpected missing route response: status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -43,11 +45,37 @@ func TestExampleUnknownRoute(t *testing.T) {
 
 func TestExampleMethodNotAllowed(t *testing.T) {
 	response := httptest.NewRecorder()
-	newApp().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/submit", nil))
+	testApp(t).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/submit", nil))
 	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodPost {
 		t.Fatalf("unexpected method response: status=%d allow=%q", response.Code, response.Header().Get("Allow"))
 	}
 	if !strings.Contains(response.Body.String(), `"code":"method_not_allowed"`) {
 		t.Fatalf("unexpected method response body: %s", response.Body.String())
 	}
+}
+
+func TestExampleCORSPreflight(t *testing.T) {
+	request := httptest.NewRequest(http.MethodOptions, "/submit", nil)
+	request.Header.Set("Origin", "http://localhost:3000")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	request.Header.Set("Access-Control-Request-Headers", "Content-Type")
+	response := httptest.NewRecorder()
+
+	testApp(t).ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("unexpected preflight status: %d", response.Code)
+	}
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Fatalf("unexpected allowed origin: %q", got)
+	}
+}
+
+func testApp(t *testing.T) *vial.App {
+	t.Helper()
+	app, err := newApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
 }

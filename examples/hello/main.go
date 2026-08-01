@@ -11,7 +11,11 @@ import (
 )
 
 func main() {
-	app := newApp()
+	app, err := newApp()
+	if err != nil {
+		slog.Error("application configuration is invalid", "error", err)
+		os.Exit(1)
+	}
 	address := os.Getenv("ADDR")
 	if address == "" {
 		address = ":8080"
@@ -23,15 +27,23 @@ func main() {
 	}
 }
 
-func newApp() *vial.App {
+func newApp() (*vial.App, error) {
 	app := vial.New(
 		vial.WithDisallowUnknownJSONFields(true),
 	)
+	cors, err := middleware.CORS(middleware.CORSConfig{
+		AllowedOrigins: []string{"http://localhost:3000"},
+		AllowedHeaders: []string{"Content-Type"},
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	app.Use(
 		middleware.RequestID(),
 		middleware.Logger(),
 		middleware.Recover(),
+		cors,
 	)
 
 	app.Get("/", func(context *vial.Context) error {
@@ -55,5 +67,5 @@ func newApp() *vial.App {
 	app.Post("/submit", func(context *vial.Context) error {
 		return context.NoContent(http.StatusNoContent)
 	})
-	return app
+	return app, nil
 }

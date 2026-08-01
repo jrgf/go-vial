@@ -11,8 +11,6 @@
 1. A small, explicit HTTP API built directly on `net/http`.
 2. A fast development loop that rebuilds and restarts the application after source changes.
 
-The repository is intentionally narrow. gRPC, realtime transports, durable jobs, templates, sessions, OpenAPI, and typed endpoint generation are future iterations—not unfinished parts of this release.
-
 ## Current MVP
 
 - Error-returning handlers: `func(*vial.Context) error`
@@ -22,7 +20,7 @@ The repository is intentionally narrow. gRPC, realtime transports, durable jobs,
 - JSON, text, redirects, and empty responses
 - Query, form, multipart, and strict JSON binding with body limits
 - Centralized structured error responses
-- Request IDs, structured logging, and panic recovery
+- Request IDs, structured logging, panic recovery, and configurable CORS
 - Graceful HTTP shutdown
 - Raw `http.Handler` mounting
 - Standard `httptest` compatibility
@@ -288,13 +286,11 @@ Builds never run concurrently. Changes detected during a build remain queued for
 ├── binding.go             # query, form, multipart, and JSON body limits
 ├── errors.go              # HTTP error model and renderer
 ├── server.go              # server lifecycle and graceful shutdown
-├── middleware/            # request ID, logging, and recovery
+├── middleware/            # request ID, logging, recovery, and CORS
 ├── internal/dev/          # watcher, builder, runner, and process control
 ├── cmd/vial/                # development CLI
 └── examples/              # runnable applications
 ```
-
-See [`docs/architecture.md`](docs/architecture.md) for the internal request and development-runner flows.
 
 ## Verification
 
