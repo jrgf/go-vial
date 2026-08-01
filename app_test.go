@@ -188,7 +188,7 @@ func TestRoutingPreservesServeMuxBehavior(t *testing.T) {
 	}{
 		{"wildcard", http.MethodGet, "/files/a/b", http.StatusOK, "a/b", ""},
 		{"head", http.MethodHead, "/files/a/b", http.StatusOK, "", ""},
-		{"redirect", http.MethodGet, "/tree", http.StatusMovedPermanently, "", "/tree/"},
+		{"redirect", http.MethodGet, "/tree", 0, "", "/tree/"},
 		{"trailing slash is exact", http.MethodGet, "/tree/child", http.StatusNotFound, "", ""},
 		{"host", http.MethodGet, "http://example.com/host", http.StatusOK, "host", ""},
 		{"methodless raw handler", http.MethodPost, "/raw", http.StatusOK, "raw", ""},
@@ -197,7 +197,12 @@ func TestRoutingPreservesServeMuxBehavior(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			response := httptest.NewRecorder()
 			app.ServeHTTP(response, httptest.NewRequest(test.method, test.target, nil))
-			if response.Code != test.wantStatus || response.Header().Get("Location") != test.wantLocation {
+			statusMatches := response.Code == test.wantStatus
+			if test.wantStatus == 0 {
+				// Go 1.26 changed ServeMux trailing-slash redirects from 301 to 307.
+				statusMatches = response.Code == http.StatusMovedPermanently || response.Code == http.StatusTemporaryRedirect
+			}
+			if !statusMatches || response.Header().Get("Location") != test.wantLocation {
 				t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
 			}
 			if test.wantBody != "" && response.Body.String() != test.wantBody {
