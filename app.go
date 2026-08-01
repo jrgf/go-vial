@@ -265,6 +265,7 @@ func (app *App) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 
 	response := newResponseWriter(writer)
 	contextValue := newContext(app, response, request)
+	defer contextValue.cleanup()
 	if err := root(contextValue); err != nil {
 		applyHTTPErrorHeaders(contextValue, err)
 		errorHandler(contextValue, err)

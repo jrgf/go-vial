@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	defaultMaxBodySize       = int64(2 << 20) // 2 MiB
+	defaultMaxBodySize       = int64(16 << 20) // 16 MiB
 	defaultReadHeaderTimeout = 5 * time.Second
 	defaultReadTimeout       = 15 * time.Second
 	defaultWriteTimeout      = 30 * time.Second

@@ -16,12 +16,13 @@ import (
 // Context contains request-scoped framework state while retaining direct access
 // to the standard net/http request and response writer.
 type Context struct {
-	app      *App
-	request  *http.Request
-	response *ResponseWriter
-	route    *Route
-	routeErr error
-	logger   *slog.Logger
+	app         *App
+	request     *http.Request
+	response    *ResponseWriter
+	route       *Route
+	routeErr    error
+	logger      *slog.Logger
+	bodyLimited bool
 
 	valuesMu sync.RWMutex
 	values   map[string]any
@@ -169,12 +170,8 @@ func (context *Context) BindJSON(destination any) error {
 		}
 	}
 
-	body := http.MaxBytesReader(
-		context.response,
-		context.request.Body,
-		context.app.config.maxBodySize,
-	)
-	decoder := json.NewDecoder(body)
+	context.limitBody()
+	decoder := json.NewDecoder(context.request.Body)
 	if context.app.config.disallowUnknownJSONFields {
 		decoder.DisallowUnknownFields()
 	}

@@ -6,6 +6,8 @@
 - Route inspection through `vial routes` and `vial routes --json`
 - Framework-owned `404` and `405` errors with native `Allow` headers
 - Exact Vial root and trailing-slash routes instead of `ServeMux` catch-alls
+- Primitive query and URL-encoded form binding
+- Size-limited multipart form/file handling with temporary-file cleanup
 
 ## 0.1.0
 

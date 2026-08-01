@@ -20,7 +20,7 @@ The repository is intentionally narrow. gRPC, realtime transports, durable jobs,
 - Method-aware routes and path parameters through `http.ServeMux`
 - Route groups with scoped middleware
 - JSON, text, redirects, and empty responses
-- Strict JSON binding with body limits
+- Query, form, multipart, and strict JSON binding with body limits
 - Centralized structured error responses
 - Request IDs, structured logging, and panic recovery
 - Graceful HTTP shutdown
@@ -147,14 +147,18 @@ app.Post("/users", func(c *vial.Context) error {
 })
 ```
 
-The application can enforce a body limit and reject unknown fields:
+The default body limit is 16 MiB. Applications can override it and reject
+unknown JSON fields:
 
 ```go
 app := vial.New(
-    vial.WithMaxBodySize(2 << 20),
+	vial.WithMaxBodySize(10 << 20),
     vial.WithDisallowUnknownJSONFields(true),
 )
 ```
+
+Query and form structs use `query` and `form` tags. Uploaded files use
+`Context.FormFile`; see the runnable [`examples/upload`](examples/upload).
 
 ## Errors
 
@@ -280,7 +284,8 @@ Builds never run concurrently. Changes detected during a build remain queued for
 ```text
 .
 ├── app.go                 # application, registration, and net/http adapter
-├── context.go             # request helpers and JSON binding
+├── context.go             # request and response helpers
+├── binding.go             # query, form, multipart, and JSON body limits
 ├── errors.go              # HTTP error model and renderer
 ├── server.go              # server lifecycle and graceful shutdown
 ├── middleware/            # request ID, logging, and recovery
