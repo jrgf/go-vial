@@ -73,11 +73,6 @@ func main() {
 	if err != nil {
 		t.Fatalf("create runner log: %v", err)
 	}
-	t.Cleanup(func() {
-		if err := output.Close(); err != nil {
-			t.Errorf("close runner log: %v", err)
-		}
-	})
 
 	runner, err := NewRunner(Config{
 		Root:           root,
