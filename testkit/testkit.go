@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -30,6 +32,20 @@ type Response struct {
 
 	body []byte
 	t    testing.TB
+}
+
+// File describes a file included in a multipart request.
+type File struct {
+	Field string
+	Name  string
+	Body  io.Reader
+}
+
+// Fault is Vial's public HTTP error representation.
+type Fault struct {
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Fields  map[string]string `json:"fields,omitempty"`
 }
 
 // Start builds and runs app on an ephemeral localhost port. The application and
@@ -122,6 +138,38 @@ func (server *Server) JSON(method, path string, value any) *Response {
 	return server.Do(request)
 }
 
+// Multipart sends form fields and files as a multipart request.
+func (server *Server) Multipart(method, path string, fields url.Values, files ...File) *Response {
+	server.t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for name, values := range fields {
+		for _, value := range values {
+			if err := writer.WriteField(name, value); err != nil {
+				server.t.Fatalf("testkit: write multipart field: %v", err)
+			}
+		}
+	}
+	for _, file := range files {
+		if file.Body == nil {
+			server.t.Fatalf("testkit: multipart file %q has no body", file.Name)
+		}
+		part, err := writer.CreateFormFile(file.Field, file.Name)
+		if err != nil {
+			server.t.Fatalf("testkit: create multipart file: %v", err)
+		}
+		if _, err := io.Copy(part, file.Body); err != nil {
+			server.t.Fatalf("testkit: write multipart file: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		server.t.Fatalf("testkit: close multipart request: %v", err)
+	}
+	request := server.NewRequest(method, path, &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	return server.Do(request)
+}
+
 // RequireStatus fails the test when the response status differs from status.
 func (response *Response) RequireStatus(status int) {
 	response.t.Helper()
@@ -141,6 +189,16 @@ func (response *Response) Decode(destination any) {
 	if err := json.Unmarshal(response.body, destination); err != nil {
 		response.t.Fatalf("testkit: decode JSON response: %v", err)
 	}
+}
+
+// Fault decodes Vial's public HTTP error response.
+func (response *Response) Fault() Fault {
+	response.t.Helper()
+	var payload struct {
+		Error Fault `json:"error"`
+	}
+	response.Decode(&payload)
+	return payload.Error
 }
 
 type readyListener struct {

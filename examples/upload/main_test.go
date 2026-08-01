@@ -1,47 +1,30 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
+
+	"github.com/jrgf/go-vial/testkit"
 )
 
 func TestUpload(t *testing.T) {
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	if err := writer.WriteField("title", "Example"); err != nil {
-		t.Fatalf("write title: %v", err)
-	}
-	file, err := writer.CreateFormFile("file", "example.txt")
-	if err != nil {
-		t.Fatalf("create file: %v", err)
-	}
-	if _, err := file.Write([]byte("hello vial")); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close form: %v", err)
-	}
-
-	request := httptest.NewRequest(http.MethodPost, "/upload", body)
-	request.Header.Set("Content-Type", writer.FormDataContentType())
-	response := httptest.NewRecorder()
-	newApp().ServeHTTP(response, request)
-	if response.Code != http.StatusCreated {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
-	}
+	server := testkit.Start(t, newApp())
+	response := server.Multipart(
+		http.MethodPost,
+		"/upload",
+		url.Values{"title": {"Example"}},
+		testkit.File{Field: "file", Name: "example.txt", Body: strings.NewReader("hello vial")},
+	)
+	response.RequireStatus(http.StatusCreated)
 
 	var result struct {
 		Title    string `json:"title"`
 		Filename string `json:"filename"`
 		Size     int64  `json:"size"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	response.Decode(&result)
 	if result.Title != "Example" || result.Filename != "example.txt" || result.Size != int64(len("hello vial")) {
 		t.Fatalf("unexpected response %#v", result)
 	}
