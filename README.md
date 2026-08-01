@@ -170,27 +170,26 @@ JSON files are applied in order, and environment variables win:
 ```go
 type AppConfig struct {
     Environment string `json:"environment" env:"VIAL_ENV"`
-    HTTP struct {
-        Address string        `json:"address" env:"VIAL_HTTP_ADDRESS"`
-        Timeout time.Duration `json:"timeout" env:"VIAL_HTTP_TIMEOUT"`
-    } `json:"http"`
+    HTTP        config.HTTP `json:"http"`
 }
 
 func (configuration *AppConfig) Validate() error {
-    if configuration.HTTP.Address == "" {
-        return errors.New("HTTP address is required")
+    if configuration.Environment == "" {
+        return errors.New("environment is required")
     }
     return nil
 }
 
 configuration := AppConfig{Environment: "development"}
-configuration.HTTP.Address = ":8080"
-configuration.HTTP.Timeout = 5 * time.Second
 
 if err := config.Load(
     &configuration,
     config.OptionalFile("config.json"),
 ); err != nil {
+    log.Fatal(err)
+}
+
+if err := app.Run(context.Background(), configuration.HTTP.Address()); err != nil {
     log.Fatal(err)
 }
 ```
@@ -200,7 +199,7 @@ An optional `config.json` can override the defaults:
 ```json
 {
   "http": {
-    "address": ":9000"
+    "port": 9000
   }
 }
 ```
@@ -208,11 +207,14 @@ An optional `config.json` can override the defaults:
 Environment variables take final precedence:
 
 ```bash
-VIAL_HTTP_ADDRESS=:9090 VIAL_HTTP_TIMEOUT=10s go run .
+VIAL_HTTP_PORT=9090 go run .
 ```
 
 Use `config.File` when a file is required. Configuration types may implement
 `config.Validator`; validation runs after all sources are loaded.
+
+`config.HTTP.Address()` defaults to `127.0.0.1:8080`. Production deployments
+that must accept external traffic can set `VIAL_HTTP_HOST=0.0.0.0` explicitly.
 
 ## Errors
 
