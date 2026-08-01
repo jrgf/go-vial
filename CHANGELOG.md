@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - Named route metadata with build-time duplicate validation and CLI output
 - Atomic module registration with middleware, groups, route ownership, and validation
