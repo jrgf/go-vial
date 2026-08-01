@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/securecookie"
@@ -17,7 +18,8 @@ import (
 const (
 	sessionCookieName = "vial_session"
 	sessionContextKey = "example.securecookie.session"
-	sessionMaxAge     = 8 * time.Hour
+	sessionMaxAge     = 5 * time.Minute
+	keyRefreshEvery   = time.Minute
 	maxCookieBytes    = 4096
 )
 
@@ -27,22 +29,30 @@ type sessionData struct {
 }
 
 type sessionManager struct {
+	mu     sync.RWMutex
 	codecs []securecookie.Codec
 	secure bool
 }
 
 func main() {
-	var keys [][]byte
-	if value := strings.TrimSpace(os.Getenv("SESSION_KEYS")); value != "" {
-		for _, key := range strings.Split(value, ",") {
-			keys = append(keys, []byte(strings.TrimSpace(key)))
+	keyFile := strings.TrimSpace(os.Getenv("SESSION_KEYS_FILE"))
+	keys := parseSessionKeys(os.Getenv("SESSION_KEYS"))
+	if keyFile != "" {
+		var err error
+		keys, err = readSessionKeys(keyFile)
+		if err != nil {
+			slog.Error("read session keys", "error", err)
+			os.Exit(1)
 		}
 	}
 
-	app, err := newApp(os.Getenv("VIAL_ALLOW_INSECURE_COOKIE") != "1", keys...)
+	app, sessions, err := newApp(os.Getenv("VIAL_ALLOW_INSECURE_COOKIE") != "1", keys...)
 	if err != nil {
 		slog.Error("build application", "error", err)
 		os.Exit(1)
+	}
+	if keyFile != "" {
+		app.Go("session-key-refresh", sessions.refreshKeys(keyFile), vial.NonCritical())
 	}
 	address := os.Getenv("ADDR")
 	if address == "" {
@@ -54,10 +64,10 @@ func main() {
 	}
 }
 
-func newApp(secure bool, keys ...[]byte) (*vial.App, error) {
+func newApp(secure bool, keys ...[]byte) (*vial.App, *sessionManager, error) {
 	sessions, err := newSessionManager(secure, keys...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	app := vial.New()
@@ -101,17 +111,25 @@ func newApp(secure bool, keys ...[]byte) (*vial.App, error) {
 		}
 		return context.NoContent(http.StatusNoContent)
 	})
-	return app, nil
+	return app, sessions, nil
 }
 
 func newSessionManager(secure bool, keys ...[]byte) (*sessionManager, error) {
+	manager := &sessionManager{secure: secure}
+	if err := manager.replaceKeys(keys...); err != nil {
+		return nil, err
+	}
+	return manager, nil
+}
+
+func (manager *sessionManager) replaceKeys(keys ...[]byte) error {
 	if len(keys) == 0 {
-		return nil, errors.New("securecookie example: at least one session key is required")
+		return errors.New("securecookie example: at least one session key is required")
 	}
 	codecs := make([]securecookie.Codec, 0, len(keys))
 	for index, key := range keys {
 		if len(key) < 32 {
-			return nil, fmt.Errorf("securecookie example: session key %d must be at least 32 bytes", index)
+			return fmt.Errorf("securecookie example: session key %d must be at least 32 bytes", index)
 		}
 		copied := append([]byte(nil), key...)
 		codec := securecookie.New(copied, nil)
@@ -120,7 +138,64 @@ func newSessionManager(secure bool, keys ...[]byte) (*sessionManager, error) {
 		codec.SetSerializer(securecookie.JSONEncoder{})
 		codecs = append(codecs, codec)
 	}
-	return &sessionManager{codecs: codecs, secure: secure}, nil
+	manager.mu.Lock()
+	manager.codecs = codecs
+	manager.mu.Unlock()
+	return nil
+}
+
+func (manager *sessionManager) currentCodecs() []securecookie.Codec {
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+	return manager.codecs
+}
+
+func (manager *sessionManager) refreshKeys(path string) vial.Task {
+	return func(context context.Context) error {
+		ticker := time.NewTicker(keyRefreshEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-context.Done():
+				return context.Err()
+			case <-ticker.C:
+				if err := manager.reloadKeys(path); err != nil {
+					slog.Warn("keep current session keys", "error", err)
+					continue
+				}
+				slog.Info("session keys refreshed")
+			}
+		}
+	}
+}
+
+func (manager *sessionManager) reloadKeys(path string) error {
+	keys, err := readSessionKeys(path)
+	if err != nil {
+		return err
+	}
+	return manager.replaceKeys(keys...)
+}
+
+func readSessionKeys(path string) ([][]byte, error) {
+	value, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return parseSessionKeys(string(value)), nil
+}
+
+func parseSessionKeys(value string) [][]byte {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	keys := make([][]byte, 0, len(parts))
+	for _, key := range parts {
+		keys = append(keys, []byte(strings.TrimSpace(key)))
+	}
+	return keys
 }
 
 func (manager *sessionManager) middleware() vial.Middleware {
@@ -133,7 +208,7 @@ func (manager *sessionManager) middleware() vial.Middleware {
 			case err != nil:
 				return fmt.Errorf("read session cookie: %w", err)
 			default:
-				if err := securecookie.DecodeMulti(sessionCookieName, cookie.Value, current, manager.codecs...); err != nil {
+				if err := securecookie.DecodeMulti(sessionCookieName, cookie.Value, current, manager.currentCodecs()...); err != nil {
 					var cookieErr securecookie.Error
 					if !errors.As(err, &cookieErr) || !cookieErr.IsDecode() {
 						return fmt.Errorf("decode session cookie: %w", err)
@@ -172,7 +247,7 @@ func (manager *sessionManager) save(context *vial.Context, current *sessionData)
 	if len(current.Values) == 0 && len(current.Flashes) == 0 {
 		return manager.destroy(context)
 	}
-	value, err := securecookie.EncodeMulti(sessionCookieName, current, manager.codecs...)
+	value, err := securecookie.EncodeMulti(sessionCookieName, current, manager.currentCodecs()...)
 	if err != nil {
 		return fmt.Errorf("encode session cookie: %w", err)
 	}

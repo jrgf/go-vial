@@ -193,8 +193,14 @@ Vial leaves session policy opt-in. The isolated
 sessions, key rotation, and one-time flash messages with `securecookie`:
 
 ```bash
-SESSION_KEYS="$(openssl rand -hex 32)" VIAL_ALLOW_INSECURE_COOKIE=1 vial dev ./examples/securecookie
+umask 077
+openssl rand -hex 32 > /tmp/vial-session-keys
+SESSION_KEYS_FILE=/tmp/vial-session-keys VIAL_ALLOW_INSECURE_COOKIE=1 vial dev ./examples/securecookie
 ```
+
+The example reloads this file every minute and expires sessions after five
+minutes. Rotate with `NEW_KEY,OLD_KEY`, newest first; remove the old key after
+five minutes.
 
 `VIAL_ALLOW_INSECURE_COOKIE=1` is only for local HTTP. Cookie contents are
 authenticated but not encrypted, so never store secrets in them. `SameSite`

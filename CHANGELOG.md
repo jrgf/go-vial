@@ -3,7 +3,7 @@
 ## 0.9.0
 
 - Isolated `securecookie` integration example with signed cookie sessions
-- Key rotation, explicit persistence, one-time flash messages, and tamper rejection
+- Minute-scale key-file rotation, explicit persistence, one-time flash messages, and tamper rejection
 - Dependency-free Vial module; the optional dependency remains inside the example module
 - Nested Go module resolution for `vial dev`, `vial routes`, and `vial doctor`
 

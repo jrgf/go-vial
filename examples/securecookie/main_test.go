@@ -5,9 +5,12 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gorilla/securecookie"
 	"github.com/jrgf/go-vial"
 )
 
@@ -93,6 +96,53 @@ func TestKeyRotation(t *testing.T) {
 	}
 }
 
+func TestSessionKeyReload(t *testing.T) {
+	oldKey := []byte("old-key-0123456789abcdef0123456789")
+	newKey := []byte("new-key-0123456789abcdef0123456789")
+	manager, err := newSessionManager(false, oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldValue, err := securecookie.EncodeMulti("probe", "old", manager.currentCodecs()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyFile := filepath.Join(t.TempDir(), "session-keys")
+	if err := os.WriteFile(keyFile, append(append(newKey, ','), oldKey...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.reloadKeys(keyFile); err != nil {
+		t.Fatal(err)
+	}
+	var decoded string
+	if err := securecookie.DecodeMulti("probe", oldValue, &decoded, manager.currentCodecs()...); err != nil || decoded != "old" {
+		t.Fatalf("old key was not retained: value=%q error=%v", decoded, err)
+	}
+
+	newOnly, err := newSessionManager(false, newKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newValue, err := securecookie.EncodeMulti("probe", "new", manager.currentCodecs()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := securecookie.DecodeMulti("probe", newValue, &decoded, newOnly.currentCodecs()...); err != nil {
+		t.Fatalf("new key did not become primary: %v", err)
+	}
+
+	if err := os.WriteFile(keyFile, []byte("short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.reloadKeys(keyFile); err == nil {
+		t.Fatal("expected invalid key reload to fail")
+	}
+	if err := securecookie.DecodeMulti("probe", newValue, &decoded, manager.currentCodecs()...); err != nil {
+		t.Fatalf("failed reload replaced valid keys: %v", err)
+	}
+}
+
 func TestSessionConfiguration(t *testing.T) {
 	if _, err := newSessionManager(false); err == nil {
 		t.Fatal("expected missing key error")
@@ -104,7 +154,7 @@ func TestSessionConfiguration(t *testing.T) {
 
 func testApp(t *testing.T, secure bool, keys ...[]byte) *vial.App {
 	t.Helper()
-	app, err := newApp(secure, keys...)
+	app, _, err := newApp(secure, keys...)
 	if err != nil {
 		t.Fatal(err)
 	}
