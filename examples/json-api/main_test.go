@@ -1,43 +1,34 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
+
+	"github.com/jrgf/go-vial/testkit"
 )
 
 func TestExampleNoteLifecycle(t *testing.T) {
-	app := newApp(&noteStore{nextID: 1})
+	server := testkit.Start(t, newApp(&noteStore{nextID: 1}))
 
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/notes", strings.NewReader(`{"title":"First","body":"Body"}`))
-	createRequest.Header.Set("Content-Type", "application/json")
-	createdResponse := httptest.NewRecorder()
-	app.ServeHTTP(createdResponse, createRequest)
+	createdResponse := server.JSON(http.MethodPost, "/api/notes", map[string]string{
+		"title": "First",
+		"body":  "Body",
+	})
+	createdResponse.RequireStatus(http.StatusCreated)
 	var created note
-	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode created note: %v", err)
-	}
-	if createdResponse.Code != http.StatusCreated || created.ID != 1 || created.Title != "First" {
-		t.Fatalf("unexpected create response: status=%d note=%+v", createdResponse.Code, created)
+	createdResponse.Decode(&created)
+	if created.ID != 1 || created.Title != "First" {
+		t.Fatalf("unexpected created note: %+v", created)
 	}
 
-	listResponse := httptest.NewRecorder()
-	app.ServeHTTP(listResponse, httptest.NewRequest(http.MethodGet, "/api/notes", nil))
+	listResponse := server.Do(server.NewRequest(http.MethodGet, "/api/notes", nil))
+	listResponse.RequireStatus(http.StatusOK)
 	var notes []note
-	if err := json.Unmarshal(listResponse.Body.Bytes(), &notes); err != nil {
-		t.Fatalf("decode notes: %v", err)
-	}
+	listResponse.Decode(&notes)
 	if len(notes) != 1 || notes[0] != created {
 		t.Fatalf("unexpected notes: %+v", notes)
 	}
 
-	invalidRequest := httptest.NewRequest(http.MethodPost, "/api/notes", strings.NewReader(`{"title":" "}`))
-	invalidRequest.Header.Set("Content-Type", "application/json")
-	invalidResponse := httptest.NewRecorder()
-	app.ServeHTTP(invalidResponse, invalidRequest)
-	if invalidResponse.Code != http.StatusBadRequest {
-		t.Fatalf("invalid note status = %d", invalidResponse.Code)
-	}
+	invalidResponse := server.JSON(http.MethodPost, "/api/notes", map[string]string{"title": " "})
+	invalidResponse.RequireStatus(http.StatusBadRequest)
 }
