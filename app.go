@@ -56,6 +56,7 @@ type App struct {
 	compiledRoot Handler
 	startHooks   []LifecycleHook
 	stopHooks    []LifecycleHook
+	tasks        []taskDefinition
 }
 
 func New(options ...Option) *App {
@@ -184,6 +185,10 @@ func (app *App) Build() error {
 			return app.buildErr
 		}
 		moduleNames[name] = struct{}{}
+	}
+	if err := validateTasks(app.tasks); err != nil {
+		app.buildErr = err
+		return app.buildErr
 	}
 
 	names := make(map[string]Route)

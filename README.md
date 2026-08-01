@@ -177,6 +177,46 @@ response.Decode(&created)
 
 Raw `net/http` requests and `httptest` remain supported.
 
+## Background tasks
+
+Keep shared queues application-owned; use contexts only for cancellation:
+
+```go
+type Event struct {
+    Name string
+}
+
+events := make(chan Event, 128)
+
+app.Post("/events", func(c *vial.Context) error {
+    select {
+    case events <- Event{Name: "user.created"}:
+        return c.NoContent(http.StatusAccepted)
+    case <-c.Request().Context().Done():
+        return c.Request().Context().Err()
+    default:
+        return vial.NewHTTPError(503, "queue_full", "Event queue is full")
+    }
+})
+
+app.Go("event-consumer", func(ctx context.Context) error {
+    for {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        case event := <-events:
+            if err := handleEvent(ctx, event); err != nil {
+                return err
+            }
+        }
+    }
+})
+```
+
+This queue is in-memory and loses pending events when the process stops. Use a
+database outbox or external broker when events must be durable. See the
+runnable [`examples/events`](examples/events).
+
 ## Configuration
 
 Use `config.Load` with an initialized struct. Existing values are defaults,

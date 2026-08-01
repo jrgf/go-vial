@@ -57,7 +57,15 @@ func (app *App) runLifecycle(parent context.Context, components ...lifecycleComp
 	app.state = applicationStarting
 	startHooks := append([]LifecycleHook(nil), app.startHooks...)
 	stopHooks := append([]LifecycleHook(nil), app.stopHooks...)
+	tasks := append([]taskDefinition(nil), app.tasks...)
+	logger := app.config.logger
 	app.mu.Unlock()
+	if len(tasks) > 0 {
+		components = append(
+			[]lifecycleComponent{newTaskSupervisor(tasks, logger)},
+			components...,
+		)
+	}
 
 	runContext, cancelRun := context.WithCancel(parent)
 	defer cancelRun()
