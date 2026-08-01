@@ -10,22 +10,102 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/jrgf/go-vial/fault"
 )
 
 const defaultMultipartMemory = int64(1 << 20) // 1 MiB
 
+var bindingMetadataCache sync.Map
+
+var bindingSources = [...]string{"path", "query", "header", "cookie", "form"}
+
+// BindingError identifies the request field that could not be bound.
+type BindingError struct {
+	Source string
+	Field  string
+	Cause  error
+}
+
+func (err *BindingError) Error() string {
+	if err == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%s field %q: %v", err.Source, err.Field, err.Cause)
+}
+
+func (err *BindingError) Unwrap() error {
+	if err == nil {
+		return nil
+	}
+	return err.Cause
+}
+
+// Bind combines tagged path, query, header, cookie, JSON, and form input.
+func (context *Context) Bind(destination any) error {
+	for _, bind := range []func(any) error{
+		context.BindPath,
+		context.BindQuery,
+		context.BindHeader,
+		context.BindCookie,
+	} {
+		if err := bind(destination); err != nil {
+			return err
+		}
+	}
+
+	contentType := context.request.Header.Get("Content-Type")
+	if contentType == "" {
+		return nil
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return UnsupportedMediaType("unsupported_media_type", "Content-Type is invalid")
+	}
+	switch {
+	case mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"):
+		return context.BindJSON(destination)
+	case mediaType == "application/x-www-form-urlencoded" || mediaType == "multipart/form-data":
+		return context.BindForm(destination)
+	default:
+		return UnsupportedMediaType("unsupported_media_type", "Content-Type is not supported for binding")
+	}
+}
+
+// BindPath binds route parameters to fields tagged with `path`.
+func (context *Context) BindPath(destination any) error {
+	return bindRequestValues(destination, "path", "invalid_path", "Path parameters contain invalid values", func(name string) ([]string, bool) {
+		value := context.request.PathValue(name)
+		return []string{value}, value != ""
+	})
+}
+
 // BindQuery binds query parameters to primitive struct fields tagged with
 // `query`. Repeated values bind to slices.
 func (context *Context) BindQuery(destination any) error {
-	if err := bindValues(destination, "query", context.request.URL.Query()); err != nil {
-		return WrapHTTPError(
-			http.StatusBadRequest,
-			"invalid_query",
-			"Query parameters contain invalid values",
-			err,
-		)
-	}
-	return nil
+	return bindValues(destination, "query", "invalid_query", "Query parameters contain invalid values", context.request.URL.Query())
+}
+
+// BindHeader binds request headers to fields tagged with `header`.
+func (context *Context) BindHeader(destination any) error {
+	return bindRequestValues(destination, "header", "invalid_header", "Request headers contain invalid values", func(name string) ([]string, bool) {
+		values := context.request.Header.Values(name)
+		return values, len(values) > 0
+	})
+}
+
+// BindCookie binds request cookies to fields tagged with `cookie`.
+func (context *Context) BindCookie(destination any) error {
+	return bindRequestValues(destination, "cookie", "invalid_cookie", "Request cookies contain invalid values", func(name string) ([]string, bool) {
+		values := make([]string, 0, 1)
+		for _, cookie := range context.request.Cookies() {
+			if cookie.Name == name {
+				values = append(values, cookie.Value)
+			}
+		}
+		return values, len(values) > 0
+	})
 }
 
 // BindForm binds URL-encoded or multipart form fields to primitive struct
@@ -35,15 +115,7 @@ func (context *Context) BindForm(destination any) error {
 	if err != nil {
 		return err
 	}
-	if err := bindValues(destination, "form", values); err != nil {
-		return WrapHTTPError(
-			http.StatusBadRequest,
-			"invalid_form",
-			"Form contains invalid values",
-			err,
-		)
-	}
-	return nil
+	return bindValues(destination, "form", "invalid_form", "Form contains invalid values", values)
 }
 
 // FormFile returns the first uploaded file for name. The caller must close the
@@ -146,32 +218,77 @@ func (context *Context) cleanup() {
 	}
 }
 
-func bindValues(destination any, tag string, values url.Values) error {
+type bindingField struct {
+	index int
+	name  string
+}
+
+type bindingMetadata struct {
+	fields map[string][]bindingField
+}
+
+func bindValues(destination any, source, code, message string, values url.Values) error {
+	return bindRequestValues(destination, source, code, message, func(name string) ([]string, bool) {
+		raw, ok := values[name]
+		return raw, ok
+	})
+}
+
+func bindRequestValues(destination any, source, code, message string, lookup func(string) ([]string, bool)) error {
 	value := reflect.ValueOf(destination)
 	if destination == nil || value.Kind() != reflect.Pointer || value.IsNil() || value.Elem().Kind() != reflect.Struct {
-		return fmt.Errorf("%s destination must be a non-nil pointer to a struct", tag)
+		return bindingFault(code, message, fmt.Errorf("%s destination must be a non-nil pointer to a struct", source))
 	}
 
 	value = value.Elem()
-	valueType := value.Type()
-	for index := 0; index < value.NumField(); index++ {
+	metadata := bindingMetadataFor(value.Type())
+	for _, field := range metadata.fields[source] {
+		raw, ok := lookup(field.name)
+		if !ok {
+			continue
+		}
+		if err := setField(value.Field(field.index), raw); err != nil {
+			return bindingFault(code, message, &BindingError{
+				Source: source,
+				Field:  field.name,
+				Cause:  err,
+			})
+		}
+	}
+	return nil
+}
+
+func bindingMetadataFor(valueType reflect.Type) *bindingMetadata {
+	if cached, ok := bindingMetadataCache.Load(valueType); ok {
+		return cached.(*bindingMetadata)
+	}
+
+	metadata := &bindingMetadata{fields: make(map[string][]bindingField, len(bindingSources))}
+	for index := 0; index < valueType.NumField(); index++ {
 		fieldType := valueType.Field(index)
 		if !fieldType.IsExported() {
 			continue
 		}
-		name := strings.Split(fieldType.Tag.Get(tag), ",")[0]
-		if name == "" || name == "-" {
-			continue
-		}
-		raw, ok := values[name]
-		if !ok {
-			continue
-		}
-		if err := setField(value.Field(index), raw); err != nil {
-			return fmt.Errorf("field %s: %w", fieldType.Name, err)
+		for _, source := range bindingSources {
+			name, _, _ := strings.Cut(fieldType.Tag.Get(source), ",")
+			if name == "" || name == "-" {
+				continue
+			}
+			metadata.fields[source] = append(metadata.fields[source], bindingField{index: index, name: name})
 		}
 	}
-	return nil
+
+	actual, _ := bindingMetadataCache.LoadOrStore(valueType, metadata)
+	return actual.(*bindingMetadata)
+}
+
+func bindingFault(code, message string, err error) error {
+	bindingErr := fault.Wrap(fault.InvalidArgument, code, message, err)
+	var fieldErr *BindingError
+	if errors.As(err, &fieldErr) {
+		bindingErr.Fields = map[string]string{fieldErr.Field: "invalid value"}
+	}
+	return bindingErr
 }
 
 func setField(field reflect.Value, values []string) error {

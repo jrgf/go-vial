@@ -178,6 +178,7 @@ func (context *Context) BindJSON(destination any) error {
 
 	if err := decoder.Decode(destination); err != nil {
 		var maxBytesErr *http.MaxBytesError
+		var typeErr *json.UnmarshalTypeError
 		switch {
 		case errors.Is(err, io.EOF):
 			return BadRequest("empty_body", "Request body must contain JSON")
@@ -185,6 +186,12 @@ func (context *Context) BindJSON(destination any) error {
 			return RequestEntityTooLarge(
 				"request_body_too_large",
 				"Request body exceeds the configured limit",
+			)
+		case errors.As(err, &typeErr) && typeErr.Field != "":
+			return bindingFault(
+				"invalid_json",
+				"Request body contains invalid JSON",
+				&BindingError{Source: "json", Field: typeErr.Field, Cause: err},
 			)
 		default:
 			return WrapHTTPError(

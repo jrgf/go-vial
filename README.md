@@ -19,7 +19,7 @@
 - Route groups with scoped middleware
 - Named application modules with isolated route registrars
 - JSON, text, redirects, and empty responses
-- Query, form, multipart, and strict JSON binding with body limits
+- Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
 - Request IDs, structured logging, panic recovery, and configurable CORS
 - Graceful HTTP shutdown
@@ -156,19 +156,23 @@ app := vial.New(
 )
 ```
 
-Query and form structs use `query` and `form` tags. Uploaded files use
-`Context.FormFile`; see the runnable [`examples/upload`](examples/upload).
+`Context.Bind` combines fields tagged with `path`, `query`, `header`, `cookie`,
+and `form` with JSON or form bodies. Uploaded files use `Context.FormFile`; see
+the runnable [`examples/upload`](examples/upload).
 
 ## Errors
 
-Handlers return an `error`. Known application failures use `HTTPError` helpers:
+Handlers return an `error`. Business failures use transport-neutral faults:
 
 ```go
-return vial.NotFound(
+return fault.New(
+    fault.NotFound,
     "user_not_found",
     "The requested user was not found",
 )
 ```
+
+Use `HTTPError` only when an HTTP-specific status or response header is needed.
 
 Default response:
 

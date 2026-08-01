@@ -24,10 +24,16 @@ func (module greetingModule) Register(registrar *vial.Registrar) error {
 		return context.JSON(http.StatusOK, map[string]string{"message": module.message})
 	}, vial.RouteName("greetings.home"))
 	registrar.Handle(http.MethodGet, "/greetings/{name}", func(context *vial.Context) error {
-		if context.Param("name") == "missing" {
+		var input struct {
+			Name string `path:"name"`
+		}
+		if err := context.Bind(&input); err != nil {
+			return err
+		}
+		if input.Name == "missing" {
 			return fault.New(fault.NotFound, "greeting_not_found", "Greeting was not found")
 		}
-		return context.Text(http.StatusOK, "Hello, "+context.Param("name"))
+		return context.Text(http.StatusOK, "Hello, "+input.Name)
 	}, vial.RouteName("greetings.show"))
 	return nil
 }

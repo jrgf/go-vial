@@ -5,6 +5,7 @@
 - Named route metadata with build-time duplicate validation and CLI output
 - Atomic module registration with middleware, groups, route ownership, and validation
 - Transport-neutral application faults with centralized, sanitized HTTP mapping
+- Cached path, query, header, cookie, JSON, form, and combined binding with field errors
 
 ## 0.3.0
 
