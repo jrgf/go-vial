@@ -28,6 +28,7 @@
 - Raw `http.Handler` mounting
 - Standard `httptest` compatibility
 - `vial dev` automatic build-and-restart loop
+- `vial load` bounded HTTP load checks and CI thresholds
 - Last-known-good process remains online after compilation failures
 - No runtime dependencies outside the Go standard library
 
@@ -426,6 +427,13 @@ Validate configuration and application build setup without starting the server:
 vial doctor ./examples/config
 ```
 
+Run a bounded load check against a deployed endpoint:
+
+```bash
+vial load --workers 2000 --duration 30s --timeout 5s http://localhost:8080/
+vial load --max-error-rate 1 --max-p95 250ms http://localhost:8080/
+```
+
 ### Replacement sequence
 
 ```text
@@ -455,9 +463,9 @@ Builds never run concurrently. Changes detected during a build remain queued for
 ├── binding.go             # query, form, multipart, and JSON body limits
 ├── errors.go              # HTTP error model and renderer
 ├── server.go              # server lifecycle and graceful shutdown
-├── middleware/            # request ID, logging, recovery, and CORS
+├── middleware/            # request ID, logging, recovery, CORS, and CSRF
 ├── internal/dev/          # watcher, builder, runner, and process control
-├── cmd/vial/                # development CLI
+├── cmd/vial/              # development and load-check CLI
 └── examples/              # runnable applications
 ```
 

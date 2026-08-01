@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -85,6 +87,54 @@ func TestRunDoctor(t *testing.T) {
 	}
 }
 
+func TestRunLoad(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	var output bytes.Buffer
+	var progress bytes.Buffer
+	if err := runLoad([]string{
+		"--workers", "2",
+		"--duration", "20ms",
+		"--timeout", "100ms",
+		server.URL,
+	}, &output, &progress); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"Requests:", "Throughput:", "Latency:", "Status: 204="} {
+		if !strings.Contains(output.String(), value) {
+			t.Errorf("load output does not contain %q: %s", value, output.String())
+		}
+	}
+	if !strings.Contains(progress.String(), "[vial] load progress: 100%") {
+		t.Fatalf("load progress missing completion: %s", progress.String())
+	}
+}
+
+func TestRunLoadThresholdFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	var output bytes.Buffer
+	err := runLoad([]string{
+		"--workers", "1",
+		"--duration", "10ms",
+		"--timeout", "100ms",
+		"--max-error-rate", "0",
+		server.URL,
+	}, &output, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "thresholds failed") {
+		t.Fatalf("threshold error=%v", err)
+	}
+	if !strings.Contains(output.String(), "500=") {
+		t.Fatalf("summary missing status: %s", output.String())
+	}
+}
+
 func TestWriteRoutesTable(t *testing.T) {
 	var output bytes.Buffer
 	err := writeRoutes(&output, []vial.Route{
@@ -116,6 +166,14 @@ func TestRunDoctorValidatesArguments(t *testing.T) {
 	}
 	if err := runDoctor([]string{"one", "two"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected multiple package error")
+	}
+}
+
+func TestRunLoadValidatesArguments(t *testing.T) {
+	for _, arguments := range [][]string{{"--unknown"}, nil, {"one", "two"}, {"--workers", "0", "http://example.com"}} {
+		if err := runLoad(arguments, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+			t.Fatalf("expected load error for %q", arguments)
+		}
 	}
 }
 

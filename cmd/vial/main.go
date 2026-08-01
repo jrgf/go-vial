@@ -11,12 +11,14 @@ import (
 	"os/signal"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/jrgf/go-vial"
 	"github.com/jrgf/go-vial/internal/dev"
+	"github.com/jrgf/go-vial/internal/load"
 )
 
-var version = "0.10.0"
+var version = "0.11.0"
 
 const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
 
@@ -51,6 +53,8 @@ func run(arguments []string) error {
 		return runRoutes(arguments[1:], os.Stdout)
 	case "doctor":
 		return runDoctor(arguments[1:], os.Stdout)
+	case "load":
+		return runLoad(arguments[1:], os.Stdout, os.Stderr)
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return nil
@@ -60,6 +64,84 @@ func run(arguments []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", arguments[0])
 	}
+}
+
+func runLoad(arguments []string, output, progressOutput io.Writer) error {
+	flags := flag.NewFlagSet("vial load", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	workers := flags.Int("workers", 50, "number of concurrent workers")
+	duration := flags.Duration("duration", 10*time.Second, "time to start requests")
+	timeout := flags.Duration("timeout", 5*time.Second, "timeout for each request")
+	maxErrorRate := flags.Float64("max-error-rate", -1, "maximum error percentage; disabled by default")
+	maxP95 := flags.Duration("max-p95", 0, "maximum p95 latency; disabled by default")
+	flags.Usage = func() {
+		_, _ = fmt.Fprintln(flags.Output(), "Usage: vial load [flags] URL")
+		flags.PrintDefaults()
+	}
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
+		return fmt.Errorf("expected one URL, received %d", flags.NArg())
+	}
+
+	contextValue, stop := signal.NotifyContext(context.Background(), developmentSignals()...)
+	defer stop()
+	config := load.Config{
+		URL:      flags.Arg(0),
+		Workers:  *workers,
+		Duration: *duration,
+		Timeout:  *timeout,
+	}
+	var result load.Result
+	finished := make(chan error, 1)
+	started := time.Now()
+	go func() {
+		var err error
+		result, err = load.Run(contextValue, config)
+		finished <- err
+	}()
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	progressComplete := false
+	var err error
+running:
+	for {
+		select {
+		case err = <-finished:
+			break running
+		case now := <-ticker.C:
+			if config.Duration <= 0 {
+				continue
+			}
+			elapsed := min(now.Sub(started), config.Duration)
+			progressComplete = elapsed == config.Duration
+			percent := int(float64(elapsed) / float64(config.Duration) * 100)
+			if _, writeErr := fmt.Fprintf(progressOutput, "[vial] load progress: %d%% (%s/%s)\n", percent, elapsed.Truncate(time.Second), config.Duration); writeErr != nil {
+				stop()
+				<-finished
+				return fmt.Errorf("write load progress: %w", writeErr)
+			}
+			if progressComplete {
+				ticker.Stop()
+			}
+		}
+	}
+	if err == nil && !progressComplete {
+		if _, writeErr := fmt.Fprintf(progressOutput, "[vial] load progress: 100%% (%s/%s)\n", config.Duration, config.Duration); writeErr != nil {
+			return fmt.Errorf("write load progress: %w", writeErr)
+		}
+	}
+	if err == nil || result.Requests > 0 {
+		if writeErr := load.WriteSummary(output, result); writeErr != nil {
+			return writeErr
+		}
+	}
+	if err != nil {
+		return err
+	}
+	return load.Check(result, load.Thresholds{MaxErrorRate: *maxErrorRate, MaxP95: *maxP95})
 }
 
 func runDev(arguments []string) error {
@@ -258,6 +340,7 @@ Usage:
   vial dev [flags] [package] [-- application arguments]
   vial routes [--json] [package] [-- application arguments]
   vial doctor [package] [-- application arguments]
+  vial load [flags] URL
   vial version
 
 Examples:
@@ -266,6 +349,7 @@ Examples:
   vial dev ./cmd/server -- --config ./config/dev.json
   vial routes ./examples/hello
   vial doctor ./examples/hello
+  vial load --workers 100 --duration 10s http://localhost:8080/
 
 `, version)
 }
