@@ -20,7 +20,7 @@
 - Named application modules with isolated route registrars
 - JSON, text, redirects, and empty responses
 - Query, form, multipart, and strict JSON binding with body limits
-- Centralized structured error responses
+- Centralized HTTP errors and transport-neutral application faults
 - Request IDs, structured logging, panic recovery, and configurable CORS
 - Graceful HTTP shutdown
 - Raw `http.Handler` mounting

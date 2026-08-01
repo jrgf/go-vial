@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/jrgf/go-vial/fault"
 )
 
 // HTTPError is an application error with a stable HTTP representation.
@@ -87,16 +89,12 @@ func InternalServerError(cause error) *HTTPError {
 
 // StatusCode returns the HTTP status represented by err, defaulting to 500.
 func StatusCode(err error) int {
-	var httpErr *HTTPError
-	if errors.As(err, &httpErr) && httpErr.Status >= 400 && httpErr.Status <= 599 {
-		return httpErr.Status
-	}
-	return http.StatusInternalServerError
+	return mapHTTPError(err).status
 }
 
 func applyHTTPErrorHeaders(context *Context, err error) {
 	var httpErr *HTTPError
-	if !errors.As(err, &httpErr) {
+	if !errors.As(err, &httpErr) || httpErr == nil {
 		return
 	}
 	for key, values := range httpErr.Headers {
@@ -110,33 +108,92 @@ func defaultErrorHandler(context *Context, err error) {
 		return
 	}
 
-	status := http.StatusInternalServerError
-	code := "internal_server_error"
-	message := "An unexpected error occurred"
+	mapped := mapHTTPError(err)
 
-	var httpErr *HTTPError
-	if errors.As(err, &httpErr) {
-		if httpErr.Status >= 400 && httpErr.Status <= 599 {
-			status = httpErr.Status
-		}
-		if httpErr.Code != "" {
-			code = httpErr.Code
-		}
-		if httpErr.Message != "" {
-			message = httpErr.Message
-		}
-	}
-
-	if status >= http.StatusInternalServerError {
+	if mapped.status >= http.StatusInternalServerError {
 		context.Logger().Error("request failed", "error", err)
 	}
 
 	context.response.Header().Set("Content-Type", "application/json; charset=utf-8")
-	context.response.WriteHeader(status)
+	context.response.WriteHeader(mapped.status)
+	details := map[string]any{
+		"code":    mapped.code,
+		"message": mapped.message,
+	}
+	if len(mapped.fields) > 0 {
+		details["fields"] = mapped.fields
+	}
 	_ = json.NewEncoder(context.response).Encode(map[string]any{
-		"error": map[string]string{
-			"code":    code,
-			"message": message,
-		},
+		"error": details,
 	})
+}
+
+type mappedHTTPError struct {
+	status  int
+	code    string
+	message string
+	fields  map[string]string
+}
+
+func mapHTTPError(err error) mappedHTTPError {
+	mapped := mappedHTTPError{
+		status:  http.StatusInternalServerError,
+		code:    "internal_server_error",
+		message: "An unexpected error occurred",
+	}
+
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) && httpErr != nil {
+		if httpErr.Status >= 400 && httpErr.Status <= 599 {
+			mapped.status = httpErr.Status
+		}
+		if httpErr.Code != "" {
+			mapped.code = httpErr.Code
+		}
+		if httpErr.Message != "" {
+			mapped.message = httpErr.Message
+		}
+		return mapped
+	}
+
+	var faultErr *fault.Error
+	if !errors.As(err, &faultErr) || faultErr == nil {
+		return mapped
+	}
+	mapped.status, mapped.code = faultHTTPStatus(faultErr.Kind)
+	if faultErr.Code != "" {
+		mapped.code = faultErr.Code
+	}
+	if mapped.status < http.StatusInternalServerError {
+		if faultErr.Message != "" {
+			mapped.message = faultErr.Message
+		} else {
+			mapped.message = http.StatusText(mapped.status)
+		}
+		mapped.fields = faultErr.Fields
+	}
+	return mapped
+}
+
+func faultHTTPStatus(kind fault.Kind) (int, string) {
+	switch kind {
+	case fault.InvalidArgument:
+		return http.StatusBadRequest, "invalid_argument"
+	case fault.Unauthenticated:
+		return http.StatusUnauthorized, "unauthenticated"
+	case fault.Forbidden:
+		return http.StatusForbidden, "forbidden"
+	case fault.NotFound:
+		return http.StatusNotFound, "not_found"
+	case fault.Conflict:
+		return http.StatusConflict, "conflict"
+	case fault.RateLimited:
+		return http.StatusTooManyRequests, "rate_limited"
+	case fault.Unavailable:
+		return http.StatusServiceUnavailable, "unavailable"
+	case fault.Internal:
+		return http.StatusInternalServerError, "internal_server_error"
+	default:
+		return http.StatusInternalServerError, "internal_server_error"
+	}
 }

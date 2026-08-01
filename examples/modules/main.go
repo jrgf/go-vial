@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/jrgf/go-vial"
+	"github.com/jrgf/go-vial/fault"
 	"github.com/jrgf/go-vial/middleware"
 )
 
@@ -22,6 +23,12 @@ func (module greetingModule) Register(registrar *vial.Registrar) error {
 	registrar.Handle(http.MethodGet, "/", func(context *vial.Context) error {
 		return context.JSON(http.StatusOK, map[string]string{"message": module.message})
 	}, vial.RouteName("greetings.home"))
+	registrar.Handle(http.MethodGet, "/greetings/{name}", func(context *vial.Context) error {
+		if context.Param("name") == "missing" {
+			return fault.New(fault.NotFound, "greeting_not_found", "Greeting was not found")
+		}
+		return context.Text(http.StatusOK, "Hello, "+context.Param("name"))
+	}, vial.RouteName("greetings.show"))
 	return nil
 }
 
