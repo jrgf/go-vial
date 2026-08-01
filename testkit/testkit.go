@@ -23,7 +23,12 @@ type Server struct {
 	URL    string
 	Client *http.Client
 
-	t testing.TB
+	t         testing.TB
+	cancel    context.CancelFunc
+	done      <-chan error
+	transport *http.Transport
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // Response wraps an HTTP response with test assertions and decoding helpers.
@@ -84,20 +89,51 @@ func Start(t testing.TB, app *vial.App) *Server {
 		<-done
 		t.Fatalf("testkit: create cookie jar: %v", err)
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport := &http.Transport{}
 	server := &Server{
-		URL:    "http://" + listener.Addr().String(),
-		Client: &http.Client{Transport: transport, Jar: jar},
-		t:      t,
+		URL:       "http://" + listener.Addr().String(),
+		Client:    &http.Client{Transport: transport, Jar: jar},
+		t:         t,
+		cancel:    cancel,
+		done:      done,
+		transport: transport,
 	}
 	t.Cleanup(func() {
-		transport.CloseIdleConnections()
-		cancel()
-		if serveErr := <-done; serveErr != nil {
+		if serveErr := server.Close(); serveErr != nil {
 			t.Errorf("testkit: stop application: %v", serveErr)
 		}
 	})
 	return server
+}
+
+// Close stops the application and waits for its shutdown hooks to finish.
+// It is safe to call more than once.
+func (server *Server) Close() error {
+	server.closeOnce.Do(func() {
+		server.transport.CloseIdleConnections()
+		server.cancel()
+		server.closeErr = <-server.done
+	})
+	return server.closeErr
+}
+
+// RequireRoute returns matching route metadata or fails the test.
+func RequireRoute(t testing.TB, app *vial.App, method, path string) vial.Route {
+	t.Helper()
+	if app == nil {
+		t.Fatal("testkit: application is nil")
+	}
+	routes, err := app.Routes()
+	if err != nil {
+		t.Fatalf("testkit: inspect routes: %v", err)
+	}
+	for _, route := range routes {
+		if route.Method == method && route.Path == path {
+			return route
+		}
+	}
+	t.Fatalf("testkit: route %s %s is not registered; routes=%#v", method, path, routes)
+	return vial.Route{}
 }
 
 // NewRequest creates a request for a path on the test server.
@@ -189,6 +225,11 @@ func (response *Response) Decode(destination any) {
 	if err := json.Unmarshal(response.body, destination); err != nil {
 		response.t.Fatalf("testkit: decode JSON response: %v", err)
 	}
+}
+
+// Text returns the response body as text.
+func (response *Response) Text() string {
+	return string(response.body)
 }
 
 // Fault decodes Vial's public HTTP error response.

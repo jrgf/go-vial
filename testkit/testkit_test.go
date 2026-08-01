@@ -34,7 +34,7 @@ func TestServerRunsLifecycleAndHTTPRequests(t *testing.T) {
 		}
 		http.SetCookie(context.Response(), &http.Cookie{Name: "session", Value: input.Name, Path: "/"})
 		return context.JSON(http.StatusCreated, input)
-	})
+	}, vial.RouteName("sessions.create"))
 	app.Get("/sessions", func(context *vial.Context) error {
 		cookie, err := context.Request().Cookie("session")
 		if err != nil {
@@ -42,29 +42,43 @@ func TestServerRunsLifecycleAndHTTPRequests(t *testing.T) {
 		}
 		return context.JSON(http.StatusOK, map[string]string{"name": cookie.Value})
 	})
-
-	t.Run("running", func(t *testing.T) {
-		server := testkit.Start(t, app)
-		if !started.Load() {
-			t.Fatal("startup hook was not run")
-		}
-
-		created := server.JSON(http.MethodPost, "/sessions", map[string]string{"name": "vial"})
-		created.RequireStatus(http.StatusCreated)
-		var payload map[string]string
-		created.Decode(&payload)
-		if payload["name"] != "vial" {
-			t.Fatalf("unexpected response: %#v", payload)
-		}
-
-		response := server.Do(server.NewRequest(http.MethodGet, "/sessions", nil))
-		response.RequireStatus(http.StatusOK)
-		response.Decode(&payload)
-		if payload["name"] != "vial" {
-			t.Fatalf("cookie was not preserved: %#v", payload)
-		}
+	app.Get("/health", func(context *vial.Context) error {
+		return context.Text(http.StatusOK, "ok")
 	})
 
+	route := testkit.RequireRoute(t, app, http.MethodPost, "/sessions")
+	if route.Name != "sessions.create" {
+		t.Fatalf("unexpected route metadata: %#v", route)
+	}
+
+	server := testkit.Start(t, app)
+	if !started.Load() {
+		t.Fatal("startup hook was not run")
+	}
+
+	created := server.JSON(http.MethodPost, "/sessions", map[string]string{"name": "vial"})
+	created.RequireStatus(http.StatusCreated)
+	var payload map[string]string
+	created.Decode(&payload)
+	if payload["name"] != "vial" {
+		t.Fatalf("unexpected response: %#v", payload)
+	}
+
+	response := server.Do(server.NewRequest(http.MethodGet, "/sessions", nil))
+	response.RequireStatus(http.StatusOK)
+	response.Decode(&payload)
+	if payload["name"] != "vial" {
+		t.Fatalf("cookie was not preserved: %#v", payload)
+	}
+	health := server.Do(server.NewRequest(http.MethodGet, "/health", nil))
+	health.RequireStatus(http.StatusOK)
+	if health.Text() != "ok" {
+		t.Fatalf("unexpected health response: %q", health.Text())
+	}
+
+	if err := server.Close(); err != nil {
+		t.Fatalf("close server: %v", err)
+	}
 	if !stopped.Load() {
 		t.Fatal("shutdown hook was not run")
 	}

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+- Lifecycle-aware `testkit` server with automatic cleanup and a cookie-aware HTTP client
+- JSON and multipart requests with status, text, JSON, and fault response helpers
+- Explicit lifecycle shutdown and route metadata checks for deterministic application tests
+
 ## 0.5.0
 
 - Deterministic application lifecycle with ordered startup hooks, reverse shutdown hooks, and managed HTTP failure propagation

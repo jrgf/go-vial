@@ -162,6 +162,21 @@ app := vial.New(
 and `form` with JSON or form bodies. Uploaded files use `Context.FormFile`; see
 the runnable [`examples/upload`](examples/upload).
 
+## Testing
+
+`testkit` runs the full application lifecycle and cleans up automatically:
+
+```go
+server := testkit.Start(t, app)
+response := server.JSON(http.MethodPost, "/users", request)
+response.RequireStatus(http.StatusCreated)
+
+var created User
+response.Decode(&created)
+```
+
+Raw `net/http` requests and `httptest` remain supported.
+
 ## Configuration
 
 Use `config.Load` with an initialized struct. Existing values are defaults,
