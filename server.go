@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"time"
 )
 
 const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
@@ -45,62 +45,58 @@ func (app *App) Serve(contextValue context.Context, listener net.Listener) error
 	if contextValue == nil {
 		contextValue = context.Background()
 	}
-	if err := app.Build(); err != nil {
-		_ = listener.Close()
-		return err
-	}
+	defer listener.Close()
 
 	runContext, stopSignals := signal.NotifyContext(contextValue, shutdownSignals()...)
 	defer stopSignals()
 
-	server := &http.Server{
-		Handler:           app,
-		ReadHeaderTimeout: app.config.readHeaderTimeout,
-		ReadTimeout:       app.config.readTimeout,
-		WriteTimeout:      app.config.writeTimeout,
-		IdleTimeout:       app.config.idleTimeout,
+	component := &httpComponent{
+		listener: listener,
+		server: &http.Server{
+			Handler:           app,
+			ReadHeaderTimeout: app.config.readHeaderTimeout,
+			ReadTimeout:       app.config.readTimeout,
+			WriteTimeout:      app.config.writeTimeout,
+			IdleTimeout:       app.config.idleTimeout,
+		},
+		done:   make(chan error, 1),
+		logger: app.config.logger,
 	}
+	return app.runLifecycle(runContext, component)
+}
 
-	serverErrors := make(chan error, 1)
+type httpComponent struct {
+	listener net.Listener
+	server   *http.Server
+	done     chan error
+	logger   *slog.Logger
+}
+
+func (component *httpComponent) Start(context.Context) error {
 	go func() {
-		serverErrors <- server.Serve(listener)
-	}()
-
-	app.config.logger.Info("HTTP server started", "address", listener.Addr().String())
-
-	select {
-	case err := <-serverErrors:
+		err := component.server.Serve(component.listener)
 		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+			err = nil
+		} else if err != nil {
+			err = fmt.Errorf("serve HTTP: %w", err)
 		}
-		return fmt.Errorf("serve HTTP: %w", err)
+		component.done <- err
+	}()
+	component.logger.Info("HTTP server started", "address", component.listener.Addr().String())
+	return nil
+}
 
-	case <-runContext.Done():
-		shutdownContext, cancel := context.WithTimeout(
-			context.Background(),
-			app.config.shutdownTimeout,
+func (component *httpComponent) Done() <-chan error {
+	return component.done
+}
+
+func (component *httpComponent) Shutdown(contextValue context.Context) error {
+	if err := component.server.Shutdown(contextValue); err != nil {
+		return errors.Join(
+			fmt.Errorf("graceful shutdown: %w", err),
+			component.server.Close(),
 		)
-		defer cancel()
-
-		shutdownErr := server.Shutdown(shutdownContext)
-		if shutdownErr != nil {
-			closeErr := server.Close()
-			return errors.Join(
-				fmt.Errorf("graceful shutdown: %w", shutdownErr),
-				closeErr,
-			)
-		}
-
-		select {
-		case err := <-serverErrors:
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				return fmt.Errorf("serve HTTP during shutdown: %w", err)
-			}
-		case <-time.After(app.config.shutdownTimeout):
-			return errors.New("HTTP server did not stop after graceful shutdown")
-		}
-
-		app.config.logger.Info("HTTP server stopped")
-		return nil
 	}
+	component.logger.Info("HTTP server stopped")
+	return nil
 }

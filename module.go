@@ -20,7 +20,7 @@ type Registrar struct {
 // Register stages modules and commits their routes atomically.
 func (app *App) Register(modules ...Module) error {
 	app.mu.RLock()
-	built := app.built
+	built := app.state >= applicationBuilt
 	app.mu.RUnlock()
 	if built {
 		return fmt.Errorf("vial: application is already built")
@@ -44,8 +44,11 @@ func (app *App) Register(modules ...Module) error {
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
-	if app.built {
+	if app.state >= applicationBuilt {
 		return fmt.Errorf("vial: application is already built")
+	}
+	if len(modules) > 0 {
+		app.state = applicationRegistering
 	}
 	app.modules = append(app.modules, names...)
 	app.routes = append(app.routes, routes...)
@@ -76,7 +79,7 @@ func (registrar *Registrar) close() []routeDefinition {
 	registrar.app.mu.Lock()
 	defer registrar.app.mu.Unlock()
 
-	registrar.app.built = true
+	registrar.app.state = applicationBuilt
 	middleware := append([]Middleware(nil), registrar.app.middleware...)
 	routes := make([]routeDefinition, len(registrar.app.routes))
 	for index, definition := range registrar.app.routes {

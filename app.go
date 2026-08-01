@@ -10,6 +10,18 @@ import (
 
 type requestContextKey struct{}
 
+type applicationState uint8
+
+const (
+	applicationCreated applicationState = iota
+	applicationRegistering
+	applicationBuilt
+	applicationStarting
+	applicationRunning
+	applicationStopping
+	applicationStopped
+)
+
 type routeMissWriter struct {
 	header http.Header
 	status int
@@ -39,9 +51,11 @@ type App struct {
 	modules      []string
 	middleware   []Middleware
 	errorHandler ErrorHandler
-	built        bool
+	state        applicationState
 	buildErr     error
 	compiledRoot Handler
+	startHooks   []LifecycleHook
+	stopHooks    []LifecycleHook
 }
 
 func New(options ...Option) *App {
@@ -142,20 +156,21 @@ func (app *App) addRoute(definition routeDefinition) {
 }
 
 func (app *App) ensureMutableLocked() {
-	if app.built {
-		panic("vial: application is already built; routes and middleware are immutable")
+	if app.state >= applicationBuilt {
+		panic("vial: application is already built; registration is immutable")
 	}
+	app.state = applicationRegistering
 }
 
-// Build validates registrations and freezes the application routing graph.
+// Build validates and freezes application registrations.
 func (app *App) Build() error {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	if app.built {
+	if app.state >= applicationBuilt {
 		return app.buildErr
 	}
-	app.built = true
+	app.state = applicationBuilt
 
 	mux := http.NewServeMux()
 	moduleNames := make(map[string]struct{}, len(app.modules))
