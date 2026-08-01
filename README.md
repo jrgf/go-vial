@@ -164,7 +164,7 @@ the runnable [`examples/upload`](examples/upload).
 
 ## HTML templates
 
-Keeps the parsing in `html/template`; `render` buffers the result before committing
+Keep parsing in `html/template`; `render` buffers the result before committing
 the response:
 
 ```go
@@ -185,6 +185,20 @@ The runnable [`examples/web`](examples/web) uses `embed.FS` and the native
 ```bash
 vial dev ./examples/web
 ```
+
+## Signed cookie sessions
+
+Vial leaves session policy opt-in. The isolated
+[`examples/securecookie`](examples/securecookie) module demonstrates signed
+sessions, key rotation, and one-time flash messages with `securecookie`:
+
+```bash
+SESSION_KEYS="$(openssl rand -hex 32)" VIAL_ALLOW_INSECURE_COOKIE=1 vial dev ./examples/securecookie
+```
+
+`VIAL_ALLOW_INSECURE_COOKIE=1` is only for local HTTP. Cookie contents are
+authenticated but not encrypted, so never store secrets in them. `SameSite`
+is defense in depth, not a replacement for CSRF protection.
 
 ## Testing
 

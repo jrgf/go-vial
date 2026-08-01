@@ -16,7 +16,7 @@ import (
 	"github.com/jrgf/go-vial/internal/dev"
 )
 
-var version = "0.8.0"
+var version = "0.9.0"
 
 const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
 
@@ -172,6 +172,10 @@ func runDoctor(arguments []string, output io.Writer) error {
 }
 
 func inspectApplication(target string, applicationArguments []string) ([]vial.Route, error) {
+	workingDirectory, resolvedTarget, err := dev.ResolvePackage("", target)
+	if err != nil {
+		return nil, err
+	}
 	temporary, err := os.CreateTemp("", "vial-inspect-*.json")
 	if err != nil {
 		return nil, fmt.Errorf("create inspection output: %w", err)
@@ -182,8 +186,9 @@ func inspectApplication(target string, applicationArguments []string) ([]vial.Ro
 		return nil, fmt.Errorf("close inspection output: %w", err)
 	}
 
-	commandArguments := append([]string{"run", target}, applicationArguments...)
+	commandArguments := append([]string{"run", resolvedTarget}, applicationArguments...)
 	command := exec.Command("go", commandArguments...)
+	command.Dir = workingDirectory
 	command.Env = append(os.Environ(), routesOutputEnvironment+"="+outputPath)
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stderr

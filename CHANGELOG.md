@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0
+
+- Isolated `securecookie` integration example with signed cookie sessions
+- Key rotation, explicit persistence, one-time flash messages, and tamper rejection
+- Dependency-free Vial module; the optional dependency remains inside the example module
+- Nested Go module resolution for `vial dev`, `vial routes`, and `vial doctor`
+
 ## 0.8.0
 
 - Buffered `html/template` rendering with named templates and safe error propagation

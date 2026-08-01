@@ -37,6 +37,9 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: false
       - run: go test ./...
+      - name: Test securecookie example
+        working-directory: examples/securecookie
+        run: go test ./...
       - run: go vet ./...
 
   race:

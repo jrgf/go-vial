@@ -3,7 +3,7 @@ COVERAGE_PROFILE ?= .vial/coverage.out
 GOEXE := $(shell go env GOEXE)
 VIAL_BIN ?= bin/vial$(GOEXE)
 
-.PHONY: test coverage race vet build install dev check
+.PHONY: test coverage race vet examples build install dev check
 
 test:
 	go test ./...
@@ -19,6 +19,9 @@ race:
 vet:
 	go vet ./...
 
+examples:
+	cd examples/securecookie && go test ./...
+
 build:
 	mkdir -p $(dir $(VIAL_BIN))
 	go build -o $(VIAL_BIN) ./cmd/vial
@@ -29,4 +32,4 @@ install:
 dev: build
 	$(VIAL_BIN) dev ./examples/hello
 
-check: coverage race vet build
+check: coverage race vet examples build
