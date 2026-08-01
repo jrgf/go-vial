@@ -16,7 +16,7 @@ import (
 	"github.com/jrgf/go-vial/internal/dev"
 )
 
-var version = "0.1.0"
+var version = "0.2.0"
 
 const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
 
