@@ -215,6 +215,7 @@ Use `config.File` when a file is required. Configuration types may implement
 
 `config.HTTP.Address()` defaults to `127.0.0.1:8080`. Production deployments
 that must accept external traffic can set `VIAL_HTTP_HOST=0.0.0.0` explicitly.
+See the runnable [`examples/config`](examples/config) application.
 
 ## Errors
 
@@ -317,6 +318,12 @@ vial routes --json ./examples/hello
 
 This command supports applications that call `App.Run`; applications using a
 custom `http.Server` can call `App.Routes` directly.
+
+Validate configuration and application build setup without starting the server:
+
+```bash
+vial doctor ./examples/config
+```
 
 ### Replacement sequence
 

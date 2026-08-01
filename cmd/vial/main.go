@@ -16,7 +16,7 @@ import (
 	"github.com/jrgf/go-vial/internal/dev"
 )
 
-var version = "0.4.0"
+var version = "0.5.0"
 
 const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
 
@@ -49,6 +49,8 @@ func run(arguments []string) error {
 		return runDev(arguments[1:])
 	case "routes":
 		return runRoutes(arguments[1:], os.Stdout)
+	case "doctor":
+		return runDoctor(arguments[1:], os.Stdout)
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return nil
@@ -133,14 +135,51 @@ func runRoutes(arguments []string, output io.Writer) error {
 		target = flags.Arg(0)
 	}
 
-	temporary, err := os.CreateTemp("", "vial-routes-*.json")
+	routes, err := inspectApplication(target, applicationArguments)
 	if err != nil {
-		return fmt.Errorf("create route output: %w", err)
+		return err
+	}
+	return writeRoutes(output, routes, *jsonOutput)
+}
+
+func runDoctor(arguments []string, output io.Writer) error {
+	frameworkArguments, applicationArguments := splitApplicationArguments(arguments)
+	flags := flag.NewFlagSet("vial doctor", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	flags.Usage = func() {
+		_, _ = fmt.Fprintln(flags.Output(), "Usage: vial doctor [package] [-- application arguments]")
+		flags.PrintDefaults()
+	}
+	if err := flags.Parse(frameworkArguments); err != nil {
+		return err
+	}
+	if flags.NArg() > 1 {
+		return fmt.Errorf("expected at most one Go package, received %d", flags.NArg())
+	}
+
+	target := "."
+	if flags.NArg() == 1 {
+		target = flags.Arg(0)
+	}
+	routes, err := inspectApplication(target, applicationArguments)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(output, "vial doctor: ok (routes: %d)\n", len(routes)); err != nil {
+		return fmt.Errorf("write doctor result: %w", err)
+	}
+	return nil
+}
+
+func inspectApplication(target string, applicationArguments []string) ([]vial.Route, error) {
+	temporary, err := os.CreateTemp("", "vial-inspect-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("create inspection output: %w", err)
 	}
 	outputPath := temporary.Name()
 	defer func() { _ = os.Remove(outputPath) }()
 	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close route output: %w", err)
+		return nil, fmt.Errorf("close inspection output: %w", err)
 	}
 
 	commandArguments := append([]string{"run", target}, applicationArguments...)
@@ -150,21 +189,21 @@ func runRoutes(arguments []string, output io.Writer) error {
 	command.Stdout = os.Stderr
 	command.Stderr = os.Stderr
 	if err := command.Run(); err != nil {
-		return fmt.Errorf("inspect routes: %w", err)
+		return nil, fmt.Errorf("inspect application: %w", err)
 	}
 
 	data, err := os.ReadFile(outputPath)
 	if err != nil {
-		return fmt.Errorf("read routes: %w", err)
+		return nil, fmt.Errorf("read inspection output: %w", err)
 	}
 	if strings.TrimSpace(string(data)) == "" {
-		return fmt.Errorf("application did not call App.Run; use App.Routes directly")
+		return nil, fmt.Errorf("application did not call App.Run; use App.Routes directly")
 	}
 	var routes []vial.Route
 	if err := json.Unmarshal(data, &routes); err != nil {
-		return fmt.Errorf("decode routes: %w", err)
+		return nil, fmt.Errorf("decode inspection output: %w", err)
 	}
-	return writeRoutes(output, routes, *jsonOutput)
+	return routes, nil
 }
 
 func writeRoutes(output io.Writer, routes []vial.Route, jsonOutput bool) error {
@@ -213,6 +252,7 @@ func printUsage() {
 Usage:
   vial dev [flags] [package] [-- application arguments]
   vial routes [--json] [package] [-- application arguments]
+  vial doctor [package] [-- application arguments]
   vial version
 
 Examples:
@@ -220,6 +260,7 @@ Examples:
   vial dev --verbose ./examples/hello
   vial dev ./cmd/server -- --config ./config/dev.json
   vial routes ./examples/hello
+  vial doctor ./examples/hello
 
 `, version)
 }

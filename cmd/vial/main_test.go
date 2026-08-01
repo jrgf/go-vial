@@ -75,6 +75,16 @@ func TestRunRoutes(t *testing.T) {
 	}
 }
 
+func TestRunDoctor(t *testing.T) {
+	var output bytes.Buffer
+	if err := runDoctor([]string{"../../examples/config"}, &output); err != nil {
+		t.Fatalf("run doctor: %v", err)
+	}
+	if got := output.String(); got != "vial doctor: ok (routes: 1)\n" {
+		t.Fatalf("doctor output = %q", got)
+	}
+}
+
 func TestWriteRoutesTable(t *testing.T) {
 	var output bytes.Buffer
 	err := writeRoutes(&output, []vial.Route{
@@ -96,6 +106,15 @@ func TestRunRoutesValidatesArguments(t *testing.T) {
 		t.Fatal("expected unknown flag error")
 	}
 	if err := runRoutes([]string{"one", "two"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected multiple package error")
+	}
+}
+
+func TestRunDoctorValidatesArguments(t *testing.T) {
+	if err := runDoctor([]string{"--unknown"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected unknown flag error")
+	}
+	if err := runDoctor([]string{"one", "two"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected multiple package error")
 	}
 }

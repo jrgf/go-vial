@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- Deterministic application lifecycle with ordered startup hooks, reverse shutdown hooks, and managed HTTP failure propagation
+- Typed configuration from JSON files and environment variables with validation and safe error messages
+- HTTP host and port configuration with localhost defaults and IPv6-safe addresses
+- `vial doctor` validation without opening a network listener
+
 ## 0.4.0
 
 - Named route metadata with build-time duplicate validation and CLI output
