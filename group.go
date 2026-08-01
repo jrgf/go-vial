@@ -37,44 +37,43 @@ func (group *Group) Group(prefix string) *Group {
 	return &Group{app: group.app, prefix: combined, middleware: middleware}
 }
 
-func (group *Group) Get(path string, handler Handler) {
-	group.Handle(http.MethodGet, path, handler)
+func (group *Group) Get(path string, handler Handler, options ...RouteOption) {
+	group.Handle(http.MethodGet, path, handler, options...)
 }
 
-func (group *Group) Post(path string, handler Handler) {
-	group.Handle(http.MethodPost, path, handler)
+func (group *Group) Post(path string, handler Handler, options ...RouteOption) {
+	group.Handle(http.MethodPost, path, handler, options...)
 }
 
-func (group *Group) Put(path string, handler Handler) {
-	group.Handle(http.MethodPut, path, handler)
+func (group *Group) Put(path string, handler Handler, options ...RouteOption) {
+	group.Handle(http.MethodPut, path, handler, options...)
 }
 
-func (group *Group) Patch(path string, handler Handler) {
-	group.Handle(http.MethodPatch, path, handler)
+func (group *Group) Patch(path string, handler Handler, options ...RouteOption) {
+	group.Handle(http.MethodPatch, path, handler, options...)
 }
 
-func (group *Group) Delete(path string, handler Handler) {
-	group.Handle(http.MethodDelete, path, handler)
+func (group *Group) Delete(path string, handler Handler, options ...RouteOption) {
+	group.Handle(http.MethodDelete, path, handler, options...)
 }
 
-func (group *Group) Options(path string, handler Handler) {
-	group.Handle(http.MethodOptions, path, handler)
+func (group *Group) Options(path string, handler Handler, options ...RouteOption) {
+	group.Handle(http.MethodOptions, path, handler, options...)
 }
 
-func (group *Group) Handle(method, path string, handler Handler) {
+func (group *Group) Handle(method, path string, handler Handler, options ...RouteOption) {
 	if handler == nil {
 		panic("vial: handler cannot be nil")
 	}
 
 	method = strings.ToUpper(strings.TrimSpace(method))
 	fullPath := joinPath(group.prefix, path)
-	group.app.addRoute(routeDefinition{
-		route: Route{
-			Method:  method,
-			Path:    fullPath,
-			Pattern: routePattern(method, fullPath),
-		},
-		handler:    handler,
-		middleware: append([]Middleware(nil), group.middleware...),
-	})
+	definition := newRouteDefinition(Route{
+		Method:  method,
+		Path:    fullPath,
+		Pattern: routePattern(method, fullPath),
+	}, options)
+	definition.handler = handler
+	definition.middleware = append([]Middleware(nil), group.middleware...)
+	group.app.addRoute(definition)
 }

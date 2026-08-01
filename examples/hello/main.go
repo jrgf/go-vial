@@ -50,22 +50,22 @@ func newApp() (*vial.App, error) {
 		return context.JSON(http.StatusOK, map[string]string{
 			"message": "Hello from vial",
 		})
-	})
+	}, vial.RouteName("home"))
 
 	app.Get("/users/{id}", func(context *vial.Context) error {
 		return context.JSON(http.StatusOK, map[string]string{
 			"id": context.Param("id"),
 		})
-	})
+	}, vial.RouteName("users.show"))
 
 	app.Get("/search", func(context *vial.Context) error {
 		return context.JSON(http.StatusOK, map[string]string{
 			"query": context.Query("q"),
 		})
-	})
+	}, vial.RouteName("search"))
 
 	app.Post("/submit", func(context *vial.Context) error {
 		return context.NoContent(http.StatusNoContent)
-	})
+	}, vial.RouteName("submit"))
 	return app, nil
 }

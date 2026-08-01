@@ -79,56 +79,54 @@ func (app *App) SetErrorHandler(handler ErrorHandler) {
 	}
 }
 
-func (app *App) Get(path string, handler Handler) {
-	app.Handle(http.MethodGet, path, handler)
+func (app *App) Get(path string, handler Handler, options ...RouteOption) {
+	app.Handle(http.MethodGet, path, handler, options...)
 }
 
-func (app *App) Post(path string, handler Handler) {
-	app.Handle(http.MethodPost, path, handler)
+func (app *App) Post(path string, handler Handler, options ...RouteOption) {
+	app.Handle(http.MethodPost, path, handler, options...)
 }
 
-func (app *App) Put(path string, handler Handler) {
-	app.Handle(http.MethodPut, path, handler)
+func (app *App) Put(path string, handler Handler, options ...RouteOption) {
+	app.Handle(http.MethodPut, path, handler, options...)
 }
 
-func (app *App) Patch(path string, handler Handler) {
-	app.Handle(http.MethodPatch, path, handler)
+func (app *App) Patch(path string, handler Handler, options ...RouteOption) {
+	app.Handle(http.MethodPatch, path, handler, options...)
 }
 
-func (app *App) Delete(path string, handler Handler) {
-	app.Handle(http.MethodDelete, path, handler)
+func (app *App) Delete(path string, handler Handler, options ...RouteOption) {
+	app.Handle(http.MethodDelete, path, handler, options...)
 }
 
-func (app *App) Options(path string, handler Handler) {
-	app.Handle(http.MethodOptions, path, handler)
+func (app *App) Options(path string, handler Handler, options ...RouteOption) {
+	app.Handle(http.MethodOptions, path, handler, options...)
 }
 
-func (app *App) Handle(method, path string, handler Handler) {
+func (app *App) Handle(method, path string, handler Handler, options ...RouteOption) {
 	if handler == nil {
 		panic("vial: handler cannot be nil")
 	}
 	method = strings.ToUpper(strings.TrimSpace(method))
 	path = normalizePath(path)
-	app.addRoute(routeDefinition{
-		route: Route{
-			Method:  method,
-			Path:    path,
-			Pattern: routePattern(method, path),
-		},
-		handler: handler,
-	})
+	definition := newRouteDefinition(Route{
+		Method:  method,
+		Path:    path,
+		Pattern: routePattern(method, path),
+	}, options)
+	definition.handler = handler
+	app.addRoute(definition)
 }
 
 // HandleHTTP mounts a standard-library handler using a native ServeMux pattern.
 // Examples include "/metrics", "GET /health", and "api.example.com/".
-func (app *App) HandleHTTP(pattern string, handler http.Handler) {
+func (app *App) HandleHTTP(pattern string, handler http.Handler, options ...RouteOption) {
 	if handler == nil {
 		panic("vial: HTTP handler cannot be nil")
 	}
-	app.addRoute(routeDefinition{
-		route:       Route{Path: pattern, Pattern: pattern},
-		httpHandler: handler,
-	})
+	definition := newRouteDefinition(Route{Path: pattern, Pattern: pattern}, options)
+	definition.httpHandler = handler
+	app.addRoute(definition)
 }
 
 func (app *App) Group(prefix string) *Group {
@@ -159,9 +157,21 @@ func (app *App) Build() error {
 	app.built = true
 
 	mux := http.NewServeMux()
+	names := make(map[string]Route)
 	for index := range app.routes {
 		definition := app.routes[index]
 		route := definition.route
+		if definition.hasName {
+			if route.Name == "" || route.Name != strings.TrimSpace(route.Name) || strings.ContainsAny(route.Name, "\r\n\t") {
+				app.buildErr = fmt.Errorf("route %q has invalid name %q", route.Pattern, route.Name)
+				return app.buildErr
+			}
+			if existing, exists := names[route.Name]; exists {
+				app.buildErr = fmt.Errorf("duplicate route name %q for %q and %q", route.Name, existing.Pattern, route.Pattern)
+				return app.buildErr
+			}
+			names[route.Name] = route
+		}
 
 		var endpoint Handler
 		if definition.handler != nil {

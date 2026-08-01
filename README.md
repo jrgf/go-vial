@@ -15,7 +15,7 @@
 
 - Error-returning handlers: `func(*vial.Context) error`
 - Standard Go middleware composition
-- Method-aware routes and path parameters through `http.ServeMux`
+- Named, method-aware routes and path parameters through `http.ServeMux`
 - Route groups with scoped middleware
 - JSON, text, redirects, and empty responses
 - Query, form, multipart, and strict JSON binding with body limits

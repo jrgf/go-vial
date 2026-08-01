@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Named route metadata with build-time duplicate validation and CLI output
+
 ## 0.3.0
 
 - Framework-owned `404` and `405` errors with native `Allow` headers

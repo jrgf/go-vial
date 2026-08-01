@@ -65,10 +65,10 @@ func TestRunRoutes(t *testing.T) {
 		t.Fatalf("decode routes: %v", err)
 	}
 	want := []vial.Route{
-		{Method: "GET", Path: "/", Pattern: "GET /{$}"},
-		{Method: "GET", Path: "/users/{id}", Pattern: "GET /users/{id}"},
-		{Method: "GET", Path: "/search", Pattern: "GET /search"},
-		{Method: "POST", Path: "/submit", Pattern: "POST /submit"},
+		{Method: "GET", Path: "/", Pattern: "GET /{$}", Name: "home"},
+		{Method: "GET", Path: "/users/{id}", Pattern: "GET /users/{id}", Name: "users.show"},
+		{Method: "GET", Path: "/search", Pattern: "GET /search", Name: "search"},
+		{Method: "POST", Path: "/submit", Pattern: "POST /submit", Name: "submit"},
 	}
 	if !reflect.DeepEqual(routes, want) {
 		t.Fatalf("routes = %#v, want %#v", routes, want)
@@ -78,13 +78,13 @@ func TestRunRoutes(t *testing.T) {
 func TestWriteRoutesTable(t *testing.T) {
 	var output bytes.Buffer
 	err := writeRoutes(&output, []vial.Route{
-		{Method: "GET", Path: "/users"},
+		{Method: "GET", Path: "/users", Name: "users.index"},
 		{Path: "GET /health"},
 	}, false)
 	if err != nil {
 		t.Fatalf("write routes: %v", err)
 	}
-	for _, value := range []string{"METHOD", "GET", "/users", "*", "GET /health"} {
+	for _, value := range []string{"METHOD", "PATH", "NAME", "GET", "/users", "users.index", "*", "GET /health", "-"} {
 		if !strings.Contains(output.String(), value) {
 			t.Errorf("table does not contain %q: %q", value, output.String())
 		}

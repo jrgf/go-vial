@@ -10,6 +10,18 @@ type Route struct {
 	Method  string
 	Path    string
 	Pattern string
+	Name    string
+}
+
+// RouteOption configures route metadata.
+type RouteOption struct {
+	name    string
+	hasName bool
+}
+
+// RouteName assigns a stable name to a route.
+func RouteName(name string) RouteOption {
+	return RouteOption{name: name, hasName: true}
 }
 
 type routeDefinition struct {
@@ -17,6 +29,18 @@ type routeDefinition struct {
 	handler     Handler
 	httpHandler http.Handler
 	middleware  []Middleware
+	hasName     bool
+}
+
+func newRouteDefinition(route Route, options []RouteOption) routeDefinition {
+	definition := routeDefinition{route: route}
+	for _, option := range options {
+		if option.hasName {
+			definition.route.Name = option.name
+			definition.hasName = true
+		}
+	}
+	return definition
 }
 
 func routePattern(method, path string) string {

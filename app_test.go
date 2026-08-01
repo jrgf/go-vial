@@ -297,20 +297,61 @@ func TestBuildReportsConflictingRoutes(t *testing.T) {
 	}
 }
 
+func TestBuildValidatesRouteNames(t *testing.T) {
+	tests := []struct {
+		name      string
+		register  func(*vial.App)
+		wantError string
+	}{
+		{
+			name: "duplicate",
+			register: func(app *vial.App) {
+				app.Get("/one", func(*vial.Context) error { return nil }, vial.RouteName("shared"))
+				app.Post("/two", func(*vial.Context) error { return nil }, vial.RouteName("shared"))
+			},
+			wantError: "duplicate route name",
+		},
+		{
+			name: "empty",
+			register: func(app *vial.App) {
+				app.Get("/one", func(*vial.Context) error { return nil }, vial.RouteName(""))
+			},
+			wantError: "invalid name",
+		},
+		{
+			name: "whitespace",
+			register: func(app *vial.App) {
+				app.Get("/one", func(*vial.Context) error { return nil }, vial.RouteName(" bad\nname"))
+			},
+			wantError: "invalid name",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app := vial.New()
+			test.register(app)
+			if err := app.Build(); err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("Build() error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
 func TestRoutesReturnsReadOnlyRegistrationOrder(t *testing.T) {
 	app := vial.New()
-	app.Get("/users/{id}", func(*vial.Context) error { return nil })
-	app.Group("/api").Post("notes", func(*vial.Context) error { return nil })
-	app.HandleHTTP("GET /health", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	app.Get("/users/{id}", func(*vial.Context) error { return nil }, vial.RouteName("users.show"))
+	app.Group("/api").Post("notes", func(*vial.Context) error { return nil }, vial.RouteName("notes.create"))
+	app.HandleHTTP("GET /health", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), vial.RouteName("health"))
 
 	routes, err := app.Routes()
 	if err != nil {
 		t.Fatalf("routes: %v", err)
 	}
 	want := []vial.Route{
-		{Method: http.MethodGet, Path: "/users/{id}", Pattern: "GET /users/{id}"},
-		{Method: http.MethodPost, Path: "/api/notes", Pattern: "POST /api/notes"},
-		{Path: "GET /health", Pattern: "GET /health"},
+		{Method: http.MethodGet, Path: "/users/{id}", Pattern: "GET /users/{id}", Name: "users.show"},
+		{Method: http.MethodPost, Path: "/api/notes", Pattern: "POST /api/notes", Name: "notes.create"},
+		{Path: "GET /health", Pattern: "GET /health", Name: "health"},
 	}
 	if !reflect.DeepEqual(routes, want) {
 		t.Fatalf("routes = %#v, want %#v", routes, want)
@@ -505,7 +546,7 @@ func TestPublicHTTPHelpersAndContextAccessors(t *testing.T) {
 
 	registrations := []struct {
 		method   string
-		register func(string, vial.Handler)
+		register func(string, vial.Handler, ...vial.RouteOption)
 	}{
 		{http.MethodPut, app.Put},
 		{http.MethodPatch, app.Patch},
@@ -532,7 +573,7 @@ func TestNestedGroupHTTPHelpers(t *testing.T) {
 	registrations := []struct {
 		method   string
 		path     string
-		register func(string, vial.Handler)
+		register func(string, vial.Handler, ...vial.RouteOption)
 	}{
 		{http.MethodPost, "/post", group.Post},
 		{http.MethodPut, "/put", group.Put},
