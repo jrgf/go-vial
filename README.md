@@ -162,6 +162,58 @@ app := vial.New(
 and `form` with JSON or form bodies. Uploaded files use `Context.FormFile`; see
 the runnable [`examples/upload`](examples/upload).
 
+## Configuration
+
+Use `config.Load` with an initialized struct. Existing values are defaults,
+JSON files are applied in order, and environment variables win:
+
+```go
+type AppConfig struct {
+    Environment string `json:"environment" env:"VIAL_ENV"`
+    HTTP struct {
+        Address string        `json:"address" env:"VIAL_HTTP_ADDRESS"`
+        Timeout time.Duration `json:"timeout" env:"VIAL_HTTP_TIMEOUT"`
+    } `json:"http"`
+}
+
+func (configuration *AppConfig) Validate() error {
+    if configuration.HTTP.Address == "" {
+        return errors.New("HTTP address is required")
+    }
+    return nil
+}
+
+configuration := AppConfig{Environment: "development"}
+configuration.HTTP.Address = ":8080"
+configuration.HTTP.Timeout = 5 * time.Second
+
+if err := config.Load(
+    &configuration,
+    config.OptionalFile("config.json"),
+); err != nil {
+    log.Fatal(err)
+}
+```
+
+An optional `config.json` can override the defaults:
+
+```json
+{
+  "http": {
+    "address": ":9000"
+  }
+}
+```
+
+Environment variables take final precedence:
+
+```bash
+VIAL_HTTP_ADDRESS=:9090 VIAL_HTTP_TIMEOUT=10s go run .
+```
+
+Use `config.File` when a file is required. Configuration types may implement
+`config.Validator`; validation runs after all sources are loaded.
+
 ## Errors
 
 Handlers return an `error`. Business failures use transport-neutral faults:
