@@ -14,7 +14,27 @@ import (
 	"testing"
 
 	"github.com/jrgf/go-vial"
+	"github.com/jrgf/go-vial/fault"
 )
+
+var errInvalidForm = errors.New("invalid form")
+
+type validatedForm struct {
+	Name string `form:"name"`
+}
+
+func (form *validatedForm) Validate() error {
+	switch form.Name {
+	case "":
+		err := fault.Wrap(fault.InvalidArgument, "name_required", "Name is required", errInvalidForm)
+		err.Fields = map[string]string{"name": "required"}
+		return err
+	case "broken":
+		return errInvalidForm
+	default:
+		return nil
+	}
+}
 
 func TestBindQuery(t *testing.T) {
 	tests := []struct {
@@ -282,6 +302,43 @@ func TestBindURLForm(t *testing.T) {
 			app.ServeHTTP(response, request)
 			if response.Code != test.wantStatus {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestBindFormValidatesAndPreservesFields(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "valid", body: "name=Ada", wantStatus: http.StatusNoContent},
+		{name: "fields", wantStatus: http.StatusBadRequest, wantBody: `"fields":{"name":"required"}`},
+		{name: "plain error", body: "name=broken", wantStatus: http.StatusBadRequest, wantBody: `"code":"invalid_form"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app := vial.New()
+			var bindErr error
+			app.Post("/people", func(context *vial.Context) error {
+				bindErr = context.BindForm(&validatedForm{})
+				if bindErr != nil {
+					return bindErr
+				}
+				return context.NoContent(http.StatusNoContent)
+			})
+
+			request := httptest.NewRequest(http.MethodPost, "/people", strings.NewReader(test.body))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			response := httptest.NewRecorder()
+			app.ServeHTTP(response, request)
+			if response.Code != test.wantStatus || !strings.Contains(response.Body.String(), test.wantBody) {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			if test.wantStatus == http.StatusBadRequest && !errors.Is(bindErr, errInvalidForm) {
+				t.Fatalf("validation cause was not retained: %v", bindErr)
 			}
 		})
 	}

@@ -1,4 +1,12 @@
 {{define "content"}}
-<h1>Hello, {{.Name}}</h1>
+<h1>Hello, {{.Greeting}}</h1>
 <p>Rendered with html/template and embedded in the application binary.</p>
+<form method="post" action="/greet">
+  <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+  <label for="name">Name</label>
+  <input id="name" name="name" value="{{.Form.Name}}" maxlength="80" required{{if index .Errors "name"}} aria-invalid="true" aria-describedby="name-error"{{end}}>
+  {{with index .Errors "name"}}<p id="name-error" role="alert">{{.}}</p>{{end}}
+  <button type="submit">Greet</button>
+</form>
+{{with .Message}}<p role="status">{{.}}</p>{{end}}
 {{end}}

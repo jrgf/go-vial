@@ -179,12 +179,14 @@ app.Get("/", func(c *vial.Context) error {
 })
 ```
 
-The runnable [`examples/web`](examples/web) uses `embed.FS` and the native
-`http.FileServerFS` for static assets:
+The runnable [`examples/web`](examples/web) adds a validated, CSRF-protected
+form and uses `embed.FS` with the native `http.FileServerFS` for static assets:
 
 ```bash
-vial dev ./examples/web
+VIAL_ALLOW_INSECURE_COOKIE=1 vial dev ./examples/web
 ```
+
+The insecure-cookie flag is only for local HTTP.
 
 ## Signed cookie sessions
 

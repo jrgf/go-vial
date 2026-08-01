@@ -21,6 +21,12 @@ var bindingMetadataCache sync.Map
 
 var bindingSources = [...]string{"path", "query", "header", "cookie", "form"}
 
+// Validator validates bound request data. Returning a *fault.Error preserves
+// its field errors for response handling and rendering.
+type Validator interface {
+	Validate() error
+}
+
 // BindingError identifies the request field that could not be bound.
 type BindingError struct {
 	Source string
@@ -115,7 +121,30 @@ func (context *Context) BindForm(destination any) error {
 	if err != nil {
 		return err
 	}
-	return bindValues(destination, "form", "invalid_form", "Form contains invalid values", values)
+	if err := bindValues(destination, "form", "invalid_form", "Form contains invalid values", values); err != nil {
+		return err
+	}
+	validator, ok := destination.(Validator)
+	if !ok {
+		return nil
+	}
+	if err := validator.Validate(); err != nil {
+		var faultErr *fault.Error
+		if errors.As(err, &faultErr) && faultErr != nil {
+			return err
+		}
+		return fault.Wrap(fault.InvalidArgument, "invalid_form", "Form contains invalid values", err)
+	}
+	return nil
+}
+
+// FormValue returns the first URL-encoded or multipart form value for name.
+func (context *Context) FormValue(name string) (string, error) {
+	values, err := context.parseForm()
+	if err != nil {
+		return "", err
+	}
+	return values.Get(name), nil
 }
 
 // FormFile returns the first uploaded file for name. The caller must close the
