@@ -16,6 +16,8 @@ func TestExampleRoutes(t *testing.T) {
 	}{
 		{"/", "message", "Hello from vial"},
 		{"/users/42", "id", "42"},
+		{"/search?q=hello+vial", "query", "hello vial"},
+		{"/search", "query", ""},
 	}
 	for _, test := range tests {
 		response := httptest.NewRecorder()

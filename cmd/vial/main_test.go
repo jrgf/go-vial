@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jrgf/go-vial"
 )
 
 func TestSplitApplicationArguments(t *testing.T) {
@@ -47,6 +51,51 @@ func TestRunCommands(t *testing.T) {
 	}
 	if err := run([]string{"unknown"}); err == nil || !strings.Contains(err.Error(), "unknown command") {
 		t.Fatalf("unexpected unknown command error %v", err)
+	}
+}
+
+func TestRunRoutes(t *testing.T) {
+	var output bytes.Buffer
+	if err := runRoutes([]string{"--json", "../../examples/hello"}, &output); err != nil {
+		t.Fatalf("run routes: %v", err)
+	}
+
+	var routes []vial.Route
+	if err := json.Unmarshal(output.Bytes(), &routes); err != nil {
+		t.Fatalf("decode routes: %v", err)
+	}
+	want := []vial.Route{
+		{Method: "GET", Path: "/", Pattern: "GET /"},
+		{Method: "GET", Path: "/users/{id}", Pattern: "GET /users/{id}"},
+		{Method: "GET", Path: "/search", Pattern: "GET /search"},
+	}
+	if !reflect.DeepEqual(routes, want) {
+		t.Fatalf("routes = %#v, want %#v", routes, want)
+	}
+}
+
+func TestWriteRoutesTable(t *testing.T) {
+	var output bytes.Buffer
+	err := writeRoutes(&output, []vial.Route{
+		{Method: "GET", Path: "/users"},
+		{Path: "GET /health"},
+	}, false)
+	if err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+	for _, value := range []string{"METHOD", "GET", "/users", "*", "GET /health"} {
+		if !strings.Contains(output.String(), value) {
+			t.Errorf("table does not contain %q: %q", value, output.String())
+		}
+	}
+}
+
+func TestRunRoutesValidatesArguments(t *testing.T) {
+	if err := runRoutes([]string{"--unknown"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected unknown flag error")
+	}
+	if err := runRoutes([]string{"one", "two"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected multiple package error")
 	}
 }
 

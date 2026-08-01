@@ -45,5 +45,11 @@ func newApp() *vial.App {
 			"id": context.Param("id"),
 		})
 	})
+
+	app.Get("/search", func(context *vial.Context) error {
+		return context.JSON(http.StatusOK, map[string]string{
+			"query": context.Query("q"),
+		})
+	})
 	return app
 }

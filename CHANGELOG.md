@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Read-only route catalog through `App.Routes`
+- Route inspection through `vial routes` and `vial routes --json`
+
 ## 0.1.0
 
 Initial vertical slice of the project:

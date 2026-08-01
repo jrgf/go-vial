@@ -2,17 +2,36 @@ package vial
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/signal"
 	"time"
 )
 
+const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
+
 // Run listens on address and serves until the parent context or a supported OS
 // shutdown signal is received.
 func (app *App) Run(contextValue context.Context, address string) error {
+	if output := os.Getenv(routesOutputEnvironment); output != "" {
+		routes, err := app.Routes()
+		if err != nil {
+			return err
+		}
+		data, err := json.Marshal(routes)
+		if err != nil {
+			return fmt.Errorf("encode routes: %w", err)
+		}
+		if err := os.WriteFile(output, append(data, '\n'), 0o600); err != nil {
+			return fmt.Errorf("write routes: %w", err)
+		}
+		return nil
+	}
+
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", address, err)

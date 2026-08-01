@@ -186,6 +186,23 @@ func (app *App) Build() error {
 	return nil
 }
 
+// Routes validates the application and returns registered route metadata in
+// registration order. The returned slice does not share state with the app.
+func (app *App) Routes() ([]Route, error) {
+	if err := app.Build(); err != nil {
+		return nil, err
+	}
+
+	app.mu.RLock()
+	defer app.mu.RUnlock()
+
+	routes := make([]Route, len(app.routes))
+	for index := range app.routes {
+		routes[index] = app.routes[index].route
+	}
+	return routes, nil
+}
+
 func safeMuxHandle(mux *http.ServeMux, pattern string, handler http.Handler) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {

@@ -243,6 +243,16 @@ It ignores:
 
 Generated binaries are written under `.vial/bin` and are ignored by the watcher.
 
+Inspect routes without starting the server:
+
+```bash
+vial routes ./examples/hello
+vial routes --json ./examples/hello
+```
+
+This command supports applications that call `App.Run`; applications using a
+custom `http.Server` can call `App.Routes` directly.
+
 ### Replacement sequence
 
 ```text
@@ -296,18 +306,6 @@ The codebase is also compile-checked for Windows and macOS in CI.
 - Windows child replacement uses direct termination; graceful console-event delivery is a later enhancement.
 - Framework errors are JSON, while unmatched `ServeMux` `404`/`405` responses still use standard-library formatting.
 - Route registration becomes immutable after the application is built or first served.
-
-## Next iteration
-
-The next milestone should harden the existing surface rather than add major features:
-
-1. Add route introspection and `vial routes`.
-2. Add query/form binding and a small validation interface.
-3. Replace or supplement polling with a native-event watcher behind an interface.
-4. Improve Windows graceful process replacement.
-5. Add a test client with JSON convenience methods.
-
-Background tasks, realtime transports, and first-class gRPC integration remain planned later, once this HTTP and lifecycle kernel has a stable API.
 
 ## Contributing
 

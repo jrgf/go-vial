@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -185,6 +187,69 @@ func TestBuildReportsConflictingRoutes(t *testing.T) {
 
 	if err := app.Build(); err == nil {
 		t.Fatal("expected route conflict")
+	}
+}
+
+func TestRoutesReturnsReadOnlyRegistrationOrder(t *testing.T) {
+	app := vial.New()
+	app.Get("/users/{id}", func(*vial.Context) error { return nil })
+	app.Group("/api").Post("notes", func(*vial.Context) error { return nil })
+	app.HandleHTTP("GET /health", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+
+	routes, err := app.Routes()
+	if err != nil {
+		t.Fatalf("routes: %v", err)
+	}
+	want := []vial.Route{
+		{Method: http.MethodGet, Path: "/users/{id}", Pattern: "GET /users/{id}"},
+		{Method: http.MethodPost, Path: "/api/notes", Pattern: "POST /api/notes"},
+		{Path: "GET /health", Pattern: "GET /health"},
+	}
+	if !reflect.DeepEqual(routes, want) {
+		t.Fatalf("routes = %#v, want %#v", routes, want)
+	}
+
+	routes[0].Path = "/changed"
+	again, err := app.Routes()
+	if err != nil {
+		t.Fatalf("routes again: %v", err)
+	}
+	if !reflect.DeepEqual(again, want) {
+		t.Fatalf("mutating returned routes changed app routes: %#v", again)
+	}
+}
+
+func TestRoutesReportsBuildErrors(t *testing.T) {
+	app := vial.New()
+	app.Get("/users/{id}", func(*vial.Context) error { return nil })
+	app.Get("/users/{name}", func(*vial.Context) error { return nil })
+
+	if _, err := app.Routes(); err == nil {
+		t.Fatal("expected route conflict")
+	}
+}
+
+func TestRunWritesRouteInspectionWithoutListening(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "routes.json")
+	t.Setenv("VIAL_ROUTES_OUTPUT", output)
+
+	app := vial.New()
+	app.Get("/health", func(*vial.Context) error { return nil })
+	if err := app.Run(context.Background(), "not a valid address"); err != nil {
+		t.Fatalf("inspect routes: %v", err)
+	}
+
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("read routes: %v", err)
+	}
+	var routes []vial.Route
+	if err := json.Unmarshal(data, &routes); err != nil {
+		t.Fatalf("decode routes: %v", err)
+	}
+	want := []vial.Route{{Method: http.MethodGet, Path: "/health", Pattern: "GET /health"}}
+	if !reflect.DeepEqual(routes, want) {
+		t.Fatalf("routes = %#v, want %#v", routes, want)
 	}
 }
 

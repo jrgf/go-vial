@@ -2,16 +2,23 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
+	"text/tabwriter"
 
+	"github.com/jrgf/go-vial"
 	"github.com/jrgf/go-vial/internal/dev"
 )
 
 var version = "0.1.0"
+
+const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
 
 type stringList []string
 
@@ -40,6 +47,8 @@ func run(arguments []string) error {
 	switch arguments[0] {
 	case "dev":
 		return runDev(arguments[1:])
+	case "routes":
+		return runRoutes(arguments[1:], os.Stdout)
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return nil
@@ -103,6 +112,80 @@ func runDev(arguments []string) error {
 	return runner.Run(contextValue)
 }
 
+func runRoutes(arguments []string, output io.Writer) error {
+	frameworkArguments, applicationArguments := splitApplicationArguments(arguments)
+	flags := flag.NewFlagSet("vial routes", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	jsonOutput := flags.Bool("json", false, "print routes as JSON")
+	flags.Usage = func() {
+		fmt.Fprintln(flags.Output(), "Usage: vial routes [--json] [package] [-- application arguments]")
+		flags.PrintDefaults()
+	}
+	if err := flags.Parse(frameworkArguments); err != nil {
+		return err
+	}
+	if flags.NArg() > 1 {
+		return fmt.Errorf("expected at most one Go package, received %d", flags.NArg())
+	}
+
+	target := "."
+	if flags.NArg() == 1 {
+		target = flags.Arg(0)
+	}
+
+	temporary, err := os.CreateTemp("", "vial-routes-*.json")
+	if err != nil {
+		return fmt.Errorf("create route output: %w", err)
+	}
+	outputPath := temporary.Name()
+	defer os.Remove(outputPath)
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close route output: %w", err)
+	}
+
+	commandArguments := append([]string{"run", target}, applicationArguments...)
+	command := exec.Command("go", commandArguments...)
+	command.Env = append(os.Environ(), routesOutputEnvironment+"="+outputPath)
+	command.Stdin = os.Stdin
+	command.Stdout = os.Stderr
+	command.Stderr = os.Stderr
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("inspect routes: %w", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		return fmt.Errorf("read routes: %w", err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return fmt.Errorf("application did not call App.Run; use App.Routes directly")
+	}
+	var routes []vial.Route
+	if err := json.Unmarshal(data, &routes); err != nil {
+		return fmt.Errorf("decode routes: %w", err)
+	}
+	return writeRoutes(output, routes, *jsonOutput)
+}
+
+func writeRoutes(output io.Writer, routes []vial.Route, jsonOutput bool) error {
+	if jsonOutput {
+		encoder := json.NewEncoder(output)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(routes)
+	}
+
+	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(table, "METHOD\tPATH")
+	for _, route := range routes {
+		method := route.Method
+		if method == "" {
+			method = "*"
+		}
+		fmt.Fprintf(table, "%s\t%s\n", method, route.Path)
+	}
+	return table.Flush()
+}
+
 func splitApplicationArguments(arguments []string) ([]string, []string) {
 	for index, argument := range arguments {
 		if argument == "--" {
@@ -117,12 +200,14 @@ func printUsage() {
 
 Usage:
   vial dev [flags] [package] [-- application arguments]
+  vial routes [--json] [package] [-- application arguments]
   vial version
 
 Examples:
   vial dev ./cmd/server
   vial dev --verbose ./examples/hello
   vial dev ./cmd/server -- --config ./config/dev.json
+  vial routes ./examples/hello
 
 `, version)
 }
