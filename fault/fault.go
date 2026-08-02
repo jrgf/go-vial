@@ -7,13 +7,21 @@ import "fmt"
 type Kind uint8
 
 const (
+	// InvalidArgument identifies invalid input supplied by a caller.
 	InvalidArgument Kind = iota
+	// Unauthenticated identifies a request without valid authentication.
 	Unauthenticated
+	// Forbidden identifies an authenticated request that is not permitted.
 	Forbidden
+	// NotFound identifies a requested resource that does not exist.
 	NotFound
+	// Conflict identifies a request that conflicts with current state.
 	Conflict
+	// RateLimited identifies a request rejected by a rate limit.
 	RateLimited
+	// Unavailable identifies a temporarily unavailable dependency or service.
 	Unavailable
+	// Internal identifies an unexpected internal failure.
 	Internal
 )
 
@@ -37,6 +45,7 @@ func Wrap(kind Kind, code, message string, cause error) *Error {
 	return &Error{Kind: kind, Code: code, Message: message, Cause: cause}
 }
 
+// Error returns the fault message and retained cause.
 func (err *Error) Error() string {
 	if err == nil {
 		return "<nil>"
@@ -54,6 +63,7 @@ func (err *Error) Error() string {
 	return message
 }
 
+// Unwrap returns the retained cause.
 func (err *Error) Unwrap() error {
 	if err == nil {
 		return nil

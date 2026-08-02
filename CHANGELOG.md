@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.0
+
+- Complete public API documentation and a fresh external-module compatibility test
+- Focused binding, configuration, and CSRF fuzz targets plus concurrent build/request coverage
+- Reject malformed CSRF origin hosts and add regression coverage for unsafe incoming request IDs
+- `ADDR` overrides for the JSON API and rendered-web examples, matching the hello example
+
+## 0.11.0
+
+- Dedicated `vial load` command with workers, duration, request timeout, thresholds, and bounded latency percentiles
+- Ten-thousand-worker concurrency with connection reuse, bounded ramp-up, and progress feedback
+- Transport errors, HTTP status counts, throughput, and latency summaries suitable for local and deployed endpoints
+
+## 0.10.0
+
+- Typed request validation after binding with transport-neutral field errors
+- Signed double-submit CSRF middleware with strict origin validation and secure cookie defaults
+- Server-rendered form example covering validation errors, CSRF tokens, and multipart binding
+
 ## 0.9.0
 
 - Isolated `securecookie` integration example with signed cookie sessions

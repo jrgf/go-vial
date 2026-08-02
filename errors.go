@@ -18,6 +18,7 @@ type HTTPError struct {
 	Headers http.Header
 }
 
+// Error returns the public error message and retained cause.
 func (err *HTTPError) Error() string {
 	if err == nil {
 		return "<nil>"
@@ -28,6 +29,7 @@ func (err *HTTPError) Error() string {
 	return err.Message
 }
 
+// Unwrap returns the retained cause.
 func (err *HTTPError) Unwrap() error {
 	if err == nil {
 		return nil
@@ -38,46 +40,57 @@ func (err *HTTPError) Unwrap() error {
 // ErrorHandler renders errors returned by handlers or middleware.
 type ErrorHandler func(*Context, error)
 
+// NewHTTPError creates an HTTP error with a stable status, code, and message.
 func NewHTTPError(status int, code, message string) *HTTPError {
 	return &HTTPError{Status: status, Code: code, Message: message}
 }
 
+// WrapHTTPError creates an HTTP error that retains cause.
 func WrapHTTPError(status int, code, message string, cause error) *HTTPError {
 	return &HTTPError{Status: status, Code: code, Message: message, Cause: cause}
 }
 
+// BadRequest creates a 400 HTTP error.
 func BadRequest(code, message string) *HTTPError {
 	return NewHTTPError(http.StatusBadRequest, code, message)
 }
 
+// Unauthorized creates a 401 HTTP error.
 func Unauthorized(code, message string) *HTTPError {
 	return NewHTTPError(http.StatusUnauthorized, code, message)
 }
 
+// Forbidden creates a 403 HTTP error.
 func Forbidden(code, message string) *HTTPError {
 	return NewHTTPError(http.StatusForbidden, code, message)
 }
 
+// NotFound creates a 404 HTTP error.
 func NotFound(code, message string) *HTTPError {
 	return NewHTTPError(http.StatusNotFound, code, message)
 }
 
+// MethodNotAllowed creates a 405 HTTP error.
 func MethodNotAllowed(code, message string) *HTTPError {
 	return NewHTTPError(http.StatusMethodNotAllowed, code, message)
 }
 
+// Conflict creates a 409 HTTP error.
 func Conflict(code, message string) *HTTPError {
 	return NewHTTPError(http.StatusConflict, code, message)
 }
 
+// UnsupportedMediaType creates a 415 HTTP error.
 func UnsupportedMediaType(code, message string) *HTTPError {
 	return NewHTTPError(http.StatusUnsupportedMediaType, code, message)
 }
 
+// RequestEntityTooLarge creates a 413 HTTP error.
 func RequestEntityTooLarge(code, message string) *HTTPError {
 	return NewHTTPError(http.StatusRequestEntityTooLarge, code, message)
 }
 
+// InternalServerError creates a generic 500 HTTP error that retains cause.
 func InternalServerError(cause error) *HTTPError {
 	return WrapHTTPError(
 		http.StatusInternalServerError,

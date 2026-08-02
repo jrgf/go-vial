@@ -211,6 +211,9 @@ func normalizeOrigin(value string, allowPath bool) (string, error) {
 	if hostname == "" {
 		return "", errors.New("must include a host")
 	}
+	if strings.Contains(hostname, ":") && net.ParseIP(hostname) == nil {
+		return "", errors.New("must include a valid host")
+	}
 	port := parsed.Port()
 	if (scheme == "http" && port == "80") || (scheme == "https" && port == "443") {
 		port = ""

@@ -38,34 +38,42 @@ func newContext(app *App, writer *ResponseWriter, request *http.Request) *Contex
 	}
 }
 
+// App returns the application serving the request.
 func (context *Context) App() *App {
 	return context.app
 }
 
+// Request returns the underlying HTTP request.
 func (context *Context) Request() *http.Request {
 	return context.request
 }
 
+// Response returns the tracked HTTP response writer.
 func (context *Context) Response() http.ResponseWriter {
 	return context.response
 }
 
+// Route returns metadata for the matched route.
 func (context *Context) Route() *Route {
 	return context.route
 }
 
+// Param returns a path parameter by name.
 func (context *Context) Param(name string) string {
 	return context.request.PathValue(name)
 }
 
+// Query returns the first query value for name.
 func (context *Context) Query(name string) string {
 	return context.request.URL.Query().Get(name)
 }
 
+// Header returns a request header value.
 func (context *Context) Header(name string) string {
 	return context.request.Header.Get(name)
 }
 
+// Logger returns the request logger.
 func (context *Context) Logger() *slog.Logger {
 	if context.logger == nil {
 		return slog.Default()
@@ -73,18 +81,21 @@ func (context *Context) Logger() *slog.Logger {
 	return context.logger
 }
 
+// SetLogger replaces the request logger when logger is non-nil.
 func (context *Context) SetLogger(logger *slog.Logger) {
 	if logger != nil {
 		context.logger = logger
 	}
 }
 
+// Set stores a request-scoped value.
 func (context *Context) Set(key string, value any) {
 	context.valuesMu.Lock()
 	context.values[key] = value
 	context.valuesMu.Unlock()
 }
 
+// Get returns a request-scoped value.
 func (context *Context) Get(key string) (any, bool) {
 	context.valuesMu.RLock()
 	value, ok := context.values[key]
@@ -92,18 +103,22 @@ func (context *Context) Get(key string) (any, bool) {
 	return value, ok
 }
 
+// Status returns the response status written so far.
 func (context *Context) Status() int {
 	return context.response.Status()
 }
 
+// BytesWritten returns the response body bytes written so far.
 func (context *Context) BytesWritten() int64 {
 	return context.response.BytesWritten()
 }
 
+// Committed reports whether the response headers were written.
 func (context *Context) Committed() bool {
 	return context.response.Committed()
 }
 
+// JSON writes a JSON response with status.
 func (context *Context) JSON(status int, value any) error {
 	if context.Committed() {
 		return errors.New("vial: response already committed")
@@ -121,6 +136,7 @@ func (context *Context) JSON(status int, value any) error {
 	return err
 }
 
+// Text writes a plain-text response with status.
 func (context *Context) Text(status int, value string) error {
 	if context.Committed() {
 		return errors.New("vial: response already committed")
@@ -132,6 +148,7 @@ func (context *Context) Text(status int, value string) error {
 	return err
 }
 
+// NoContent writes a response status without a body.
 func (context *Context) NoContent(status int) error {
 	if context.Committed() {
 		return errors.New("vial: response already committed")
@@ -140,6 +157,7 @@ func (context *Context) NoContent(status int) error {
 	return nil
 }
 
+// Redirect writes an HTTP redirect response.
 func (context *Context) Redirect(status int, location string) error {
 	if context.Committed() {
 		return errors.New("vial: response already committed")

@@ -34,6 +34,7 @@ type BindingError struct {
 	Cause  error
 }
 
+// Error describes the binding source, field, and cause.
 func (err *BindingError) Error() string {
 	if err == nil {
 		return "<nil>"
@@ -41,6 +42,7 @@ func (err *BindingError) Error() string {
 	return fmt.Sprintf("%s field %q: %v", err.Source, err.Field, err.Cause)
 }
 
+// Unwrap returns the binding failure cause.
 func (err *BindingError) Unwrap() error {
 	if err == nil {
 		return nil

@@ -50,7 +50,12 @@ func main() {
 		slog.Error("build application", "error", err)
 		os.Exit(1)
 	}
-	if err := app.Run(context.Background(), ":8080"); err != nil {
+	address := os.Getenv("ADDR")
+	if address == "" {
+		address = ":8080"
+	}
+
+	if err := app.Run(context.Background(), address); err != nil {
 		slog.Error("application stopped with an error", "error", err)
 		os.Exit(1)
 	}

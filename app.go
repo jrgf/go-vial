@@ -59,6 +59,7 @@ type App struct {
 	tasks        []taskDefinition
 }
 
+// New creates an application with the supplied options.
 func New(options ...Option) *App {
 	cfg := defaultConfig()
 	for _, option := range options {
@@ -73,6 +74,7 @@ func New(options ...Option) *App {
 	}
 }
 
+// Use adds middleware to the application-wide chain.
 func (app *App) Use(middleware ...Middleware) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -85,6 +87,7 @@ func (app *App) Use(middleware ...Middleware) {
 	}
 }
 
+// SetErrorHandler replaces the application's error renderer.
 func (app *App) SetErrorHandler(handler ErrorHandler) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -95,30 +98,37 @@ func (app *App) SetErrorHandler(handler ErrorHandler) {
 	}
 }
 
+// Get registers a GET route.
 func (app *App) Get(path string, handler Handler, options ...RouteOption) {
 	app.Handle(http.MethodGet, path, handler, options...)
 }
 
+// Post registers a POST route.
 func (app *App) Post(path string, handler Handler, options ...RouteOption) {
 	app.Handle(http.MethodPost, path, handler, options...)
 }
 
+// Put registers a PUT route.
 func (app *App) Put(path string, handler Handler, options ...RouteOption) {
 	app.Handle(http.MethodPut, path, handler, options...)
 }
 
+// Patch registers a PATCH route.
 func (app *App) Patch(path string, handler Handler, options ...RouteOption) {
 	app.Handle(http.MethodPatch, path, handler, options...)
 }
 
+// Delete registers a DELETE route.
 func (app *App) Delete(path string, handler Handler, options ...RouteOption) {
 	app.Handle(http.MethodDelete, path, handler, options...)
 }
 
+// Options registers an OPTIONS route.
 func (app *App) Options(path string, handler Handler, options ...RouteOption) {
 	app.Handle(http.MethodOptions, path, handler, options...)
 }
 
+// Handle registers a route for an HTTP method and path.
 func (app *App) Handle(method, path string, handler Handler, options ...RouteOption) {
 	if handler == nil {
 		panic("vial: handler cannot be nil")
@@ -145,6 +155,7 @@ func (app *App) HandleHTTP(pattern string, handler http.Handler, options ...Rout
 	app.addRoute(definition)
 }
 
+// Group creates a route group with a shared path prefix.
 func (app *App) Group(prefix string) *Group {
 	return &Group{app: app, prefix: normalizeGroupPrefix(prefix)}
 }
@@ -297,6 +308,7 @@ func routeMiss(mux *http.ServeMux, request *http.Request) *HTTPError {
 	return NotFound("not_found", http.StatusText(http.StatusNotFound))
 }
 
+// ServeHTTP implements http.Handler and builds the application on first use.
 func (app *App) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if err := app.Build(); err != nil {
 		app.config.logger.Error("framework build failed", "error", err)

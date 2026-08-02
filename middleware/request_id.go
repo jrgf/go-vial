@@ -12,8 +12,10 @@ import (
 )
 
 const (
+	// RequestIDHeader is the HTTP header used to carry request IDs.
 	RequestIDHeader = "X-Request-ID"
-	RequestIDKey    = "request_id"
+	// RequestIDKey is the context key used to store request IDs.
+	RequestIDKey = "request_id"
 )
 
 var fallbackRequestID atomic.Uint64
@@ -35,6 +37,7 @@ func RequestID() vial.Middleware {
 	}
 }
 
+// RequestIDFromContext returns the request ID installed by RequestID.
 func RequestIDFromContext(context *vial.Context) string {
 	value, ok := context.Get(RequestIDKey)
 	if !ok {

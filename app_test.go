@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,6 +46,40 @@ func TestRouteParameterAndJSONResponse(t *testing.T) {
 	}
 	if body["id"] != "42" {
 		t.Fatalf("expected path id 42, got %q", body["id"])
+	}
+}
+
+func TestConcurrentBuildAndServeHTTP(t *testing.T) {
+	app := vial.New()
+	app.Get("/", func(context *vial.Context) error {
+		return context.NoContent(http.StatusNoContent)
+	})
+
+	const workers = 100
+	start := make(chan struct{})
+	errors := make(chan string, workers)
+	var group sync.WaitGroup
+	group.Add(workers)
+	for range workers {
+		go func() {
+			defer group.Done()
+			<-start
+			if err := app.Build(); err != nil {
+				errors <- err.Error()
+				return
+			}
+			response := httptest.NewRecorder()
+			app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+			if response.Code != http.StatusNoContent {
+				errors <- http.StatusText(response.Code)
+			}
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(errors)
+	for err := range errors {
+		t.Error(err)
 	}
 }
 

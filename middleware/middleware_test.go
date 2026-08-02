@@ -49,6 +49,24 @@ func TestRequestIDGeneratesValue(t *testing.T) {
 	}
 }
 
+func TestRequestIDRejectsUnsafeIncomingValues(t *testing.T) {
+	for _, requestID := range []string{"unsafe\nvalue", "unsafe\rvalue", strings.Repeat("x", 129)} {
+		app := vial.New()
+		app.Use(middleware.RequestID())
+		app.Get("/", func(context *vial.Context) error {
+			return context.NoContent(http.StatusNoContent)
+		})
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Header.Set(middleware.RequestIDHeader, requestID)
+		response := httptest.NewRecorder()
+		app.ServeHTTP(response, request)
+		generated := response.Header().Get(middleware.RequestIDHeader)
+		if generated == requestID || len(generated) != 32 {
+			t.Fatalf("unsafe request ID %q produced %q", requestID, generated)
+		}
+	}
+}
+
 func TestRecoveryReturnsGenericInternalError(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))

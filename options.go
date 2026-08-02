@@ -40,6 +40,7 @@ func defaultConfig() config {
 // Option configures an App.
 type Option func(*config)
 
+// WithLogger sets the application logger when logger is non-nil.
 func WithLogger(logger *slog.Logger) Option {
 	return func(cfg *config) {
 		if logger != nil {
@@ -48,6 +49,7 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
+// WithMaxBodySize sets the request body limit when bytes is positive.
 func WithMaxBodySize(bytes int64) Option {
 	return func(cfg *config) {
 		if bytes > 0 {
@@ -56,12 +58,14 @@ func WithMaxBodySize(bytes int64) Option {
 	}
 }
 
+// WithDisallowUnknownJSONFields controls rejection of unknown JSON fields.
 func WithDisallowUnknownJSONFields(enabled bool) Option {
 	return func(cfg *config) {
 		cfg.disallowUnknownJSONFields = enabled
 	}
 }
 
+// WithReadHeaderTimeout sets the HTTP server header-read timeout.
 func WithReadHeaderTimeout(timeout time.Duration) Option {
 	return func(cfg *config) {
 		if timeout >= 0 {
@@ -70,6 +74,7 @@ func WithReadHeaderTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithReadTimeout sets the HTTP server request-read timeout.
 func WithReadTimeout(timeout time.Duration) Option {
 	return func(cfg *config) {
 		if timeout >= 0 {
@@ -78,6 +83,7 @@ func WithReadTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithWriteTimeout sets the HTTP server response-write timeout.
 func WithWriteTimeout(timeout time.Duration) Option {
 	return func(cfg *config) {
 		if timeout >= 0 {
@@ -86,6 +92,7 @@ func WithWriteTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithIdleTimeout sets the HTTP server keep-alive idle timeout.
 func WithIdleTimeout(timeout time.Duration) Option {
 	return func(cfg *config) {
 		if timeout >= 0 {
@@ -94,6 +101,7 @@ func WithIdleTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithShutdownTimeout sets the graceful shutdown deadline when timeout is positive.
 func WithShutdownTimeout(timeout time.Duration) Option {
 	return func(cfg *config) {
 		if timeout > 0 {
