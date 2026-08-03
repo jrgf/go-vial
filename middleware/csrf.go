@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	csrfContextKey    = "vial.middleware.csrf.token"
 	csrfCookieName    = "__Host-vial_csrf"
 	csrfDevCookieName = "vial_csrf"
 	csrfHeaderName    = "X-CSRF-Token"
@@ -27,13 +26,16 @@ const (
 	csrfMaxAge        = 12 * time.Hour
 )
 
+var csrfContextKey = vial.NewValueKey[string]("csrf_token")
+
 // CSRFConfig defines the signing key and accepted browser origins.
 type CSRFConfig struct {
 	Key []byte
 	// TrustedOrigins overrides request-host matching, typically behind a proxy.
 	TrustedOrigins []string
-	// AllowInsecure permits the CSRF cookie over local HTTP only.
-	AllowInsecure bool
+	// DangerouslyAllowInsecureCookies permits local loopback HTTP development.
+	// Requests whose Host is not loopback fail closed even when enabled.
+	DangerouslyAllowInsecureCookies bool
 }
 
 type csrfPolicy struct {
@@ -55,13 +57,16 @@ func CSRF(config CSRFConfig) (vial.Middleware, error) {
 	return func(next vial.Handler) vial.Handler {
 		return func(context *vial.Context) error {
 			request := context.Request()
+			if !policy.secure && !csrfLoopbackHost(request.Host) {
+				return vial.InternalServerError(fmt.Errorf("insecure CSRF cookies require a loopback request host"))
+			}
 			addVary(context.Response().Header(), "Cookie")
 			if csrfSafeMethod(request.Method) {
 				token, err := policy.issueToken(context)
 				if err != nil {
 					return err
 				}
-				context.Set(csrfContextKey, token)
+				csrfContextKey.Set(context, token)
 				return next(context)
 			}
 
@@ -79,7 +84,7 @@ func CSRF(config CSRFConfig) (vial.Middleware, error) {
 			if token == "" || !hmac.Equal([]byte(token), []byte(cookie.Value)) {
 				return csrfForbidden()
 			}
-			context.Set(csrfContextKey, token)
+			csrfContextKey.Set(context, token)
 			return next(context)
 		}
 	}, nil
@@ -87,11 +92,7 @@ func CSRF(config CSRFConfig) (vial.Middleware, error) {
 
 // CSRFToken returns the request token exposed by CSRF middleware.
 func CSRFToken(context *vial.Context) string {
-	value, ok := context.Get(csrfContextKey)
-	if !ok {
-		return ""
-	}
-	token, _ := value.(string)
+	token, _ := csrfContextKey.Get(context)
 	return token
 }
 
@@ -107,7 +108,7 @@ func newCSRFPolicy(config CSRFConfig) (csrfPolicy, error) {
 		}
 		origins[origin] = struct{}{}
 	}
-	secure := !config.AllowInsecure
+	secure := !config.DangerouslyAllowInsecureCookies
 	cookieName := csrfCookieName
 	if !secure {
 		cookieName = csrfDevCookieName
@@ -118,6 +119,19 @@ func newCSRFPolicy(config CSRFConfig) (csrfPolicy, error) {
 		secure:         secure,
 		cookieName:     cookieName,
 	}, nil
+}
+
+func csrfLoopbackHost(value string) bool {
+	host := strings.TrimSpace(value)
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (policy csrfPolicy) issueToken(context *vial.Context) (string, error) {

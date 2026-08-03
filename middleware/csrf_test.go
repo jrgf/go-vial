@@ -131,12 +131,12 @@ func TestCSRFSafeMethodsDoNotRequireOrigin(t *testing.T) {
 
 func TestCSRFTrustedOriginAndConfiguration(t *testing.T) {
 	app := csrfApp(t, middleware.CSRFConfig{
-		Key:            csrfTestKey,
-		TrustedOrigins: []string{"https://public.example"},
-		AllowInsecure:  true,
+		Key:                             csrfTestKey,
+		TrustedOrigins:                  []string{"https://public.example"},
+		DangerouslyAllowInsecureCookies: true,
 	})
 	token, cookie := csrfToken(t, app)
-	request := httptest.NewRequest(http.MethodDelete, "http://internal/submit", nil)
+	request := httptest.NewRequest(http.MethodDelete, "http://127.0.0.1/submit", nil)
 	request.Header.Set("Origin", "https://public.example")
 	request.Header.Set("X-CSRF-Token", token)
 	request.AddCookie(cookie)
@@ -158,6 +158,42 @@ func TestCSRFTrustedOriginAndConfiguration(t *testing.T) {
 		if _, err := middleware.CSRF(config); err == nil {
 			t.Fatalf("expected configuration error for %#v", config)
 		}
+	}
+}
+
+func TestCSRFInsecureCookiesAreLoopbackOnly(t *testing.T) {
+	app := csrfApp(t, middleware.CSRFConfig{
+		Key:                             csrfTestKey,
+		DangerouslyAllowInsecureCookies: true,
+	})
+	tests := []struct {
+		name       string
+		host       string
+		forwarded  string
+		wantStatus int
+	}{
+		{name: "IPv4 loopback", host: "127.0.0.1:8080", wantStatus: http.StatusOK},
+		{name: "IPv6 loopback", host: "[::1]:8080", wantStatus: http.StatusOK},
+		{name: "unspecified", host: "0.0.0.0:8080", wantStatus: http.StatusInternalServerError},
+		{name: "public", host: "203.0.113.10", wantStatus: http.StatusInternalServerError},
+		{name: "proxy headers are untrusted", host: "public.example", forwarded: "127.0.0.1", wantStatus: http.StatusInternalServerError},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "http://"+test.host+"/", nil)
+			if test.forwarded != "" {
+				request.Header.Set("X-Forwarded-Host", test.forwarded)
+				request.Header.Set("Forwarded", "host="+test.forwarded)
+			}
+			response := httptest.NewRecorder()
+			app.ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			if test.wantStatus != http.StatusOK && len(response.Result().Cookies()) != 0 {
+				t.Fatal("insecure cookie was issued to a non-loopback host")
+			}
+		})
 	}
 }
 
@@ -183,7 +219,7 @@ func csrfApp(t *testing.T, config middleware.CSRFConfig) *vial.App {
 func csrfToken(t *testing.T, app *vial.App) (string, *http.Cookie) {
 	t.Helper()
 	response := httptest.NewRecorder()
-	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://internal/", nil))
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
 	cookies := response.Result().Cookies()
 	if response.Code != http.StatusOK || len(cookies) != 1 {
 		t.Fatalf("status=%d cookies=%d body=%s", response.Code, len(cookies), response.Body.String())

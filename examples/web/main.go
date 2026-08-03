@@ -77,8 +77,8 @@ func newApp() (*vial.App, error) {
 		return nil, err
 	}
 	csrf, err := middleware.CSRF(middleware.CSRFConfig{
-		Key:           csrfKey,
-		AllowInsecure: os.Getenv("VIAL_ALLOW_INSECURE_COOKIE") == "1",
+		Key:                             csrfKey,
+		DangerouslyAllowInsecureCookies: os.Getenv("VIAL_ALLOW_INSECURE_COOKIE") == "1",
 	})
 	if err != nil {
 		return nil, err

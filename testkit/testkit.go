@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net"
@@ -14,9 +15,31 @@ import (
 	"net/url"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jrgf/go-vial"
 )
+
+const defaultRequestTimeout = 5 * time.Second
+
+type serverConfig struct {
+	requestTimeout time.Duration
+}
+
+// Option configures a test server.
+type Option func(*serverConfig) error
+
+// WithTimeout sets the HTTP client timeout. A zero timeout explicitly disables
+// it for streaming tests.
+func WithTimeout(timeout time.Duration) Option {
+	return func(config *serverConfig) error {
+		if timeout < 0 {
+			return fmt.Errorf("timeout cannot be negative")
+		}
+		config.requestTimeout = timeout
+		return nil
+	}
+}
 
 // Server runs a Vial application for the duration of a test.
 type Server struct {
@@ -55,8 +78,17 @@ type Fault struct {
 
 // Start builds and runs app on an ephemeral localhost port. The application and
 // its HTTP client are stopped automatically when the test completes.
-func Start(t testing.TB, app *vial.App) *Server {
+func Start(t testing.TB, app *vial.App, options ...Option) *Server {
 	t.Helper()
+	config := serverConfig{requestTimeout: defaultRequestTimeout}
+	for _, option := range options {
+		if option == nil {
+			t.Fatal("testkit: option cannot be nil")
+		}
+		if err := option(&config); err != nil {
+			t.Fatalf("testkit: configure server: %v", err)
+		}
+	}
 	if app == nil {
 		t.Fatal("testkit: application is nil")
 	}
@@ -92,7 +124,7 @@ func Start(t testing.TB, app *vial.App) *Server {
 	transport := &http.Transport{}
 	server := &Server{
 		URL:       "http://" + listener.Addr().String(),
-		Client:    &http.Client{Transport: transport, Jar: jar},
+		Client:    &http.Client{Transport: transport, Jar: jar, Timeout: config.requestTimeout},
 		t:         t,
 		cancel:    cancel,
 		done:      done,

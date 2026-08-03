@@ -27,3 +27,18 @@ func FuzzNormalizeOrigin(fuzz *testing.F) {
 		}
 	})
 }
+
+func FuzzCSRFTokenParsing(fuzz *testing.F) {
+	policy, err := newCSRFPolicy(CSRFConfig{Key: []byte("0123456789abcdef0123456789abcdef")})
+	if err != nil {
+		fuzz.Fatal(err)
+	}
+	fuzz.Add("")
+	fuzz.Add("invalid.invalid")
+	fuzz.Fuzz(func(t *testing.T, token string) {
+		if len(token) > 8<<10 {
+			t.Skip()
+		}
+		_ = policy.validToken(token)
+	})
+}

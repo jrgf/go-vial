@@ -46,13 +46,16 @@ func TestStringList(t *testing.T) {
 }
 
 func TestRunCommands(t *testing.T) {
-	for _, arguments := range [][]string{nil, {"help"}, {"version"}} {
+	for _, arguments := range [][]string{nil, {"help"}, {"version"}, {"version", "--verbose"}} {
 		if err := run(arguments); err != nil {
 			t.Errorf("run(%q): %v", arguments, err)
 		}
 	}
 	if err := run([]string{"unknown"}); err == nil || !strings.Contains(err.Error(), "unknown command") {
 		t.Fatalf("unexpected unknown command error %v", err)
+	}
+	if err := run([]string{"version", "--unknown"}); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("invalid version arguments returned %v", err)
 	}
 }
 
@@ -67,10 +70,10 @@ func TestRunRoutes(t *testing.T) {
 		t.Fatalf("decode routes: %v", err)
 	}
 	want := []vial.Route{
-		{Method: "GET", Path: "/", Pattern: "GET /{$}", Name: "home"},
-		{Method: "GET", Path: "/users/{id}", Pattern: "GET /users/{id}", Name: "users.show"},
-		{Method: "GET", Path: "/search", Pattern: "GET /search", Name: "search"},
-		{Method: "POST", Path: "/submit", Pattern: "POST /submit", Name: "submit"},
+		{Method: "GET", Path: "/", Pattern: "GET /{$}", Name: "home", MiddlewareCount: 4},
+		{Method: "GET", Path: "/users/{id}", Pattern: "GET /users/{id}", Name: "users.show", MiddlewareCount: 4, Parameters: []string{"id"}},
+		{Method: "GET", Path: "/search", Pattern: "GET /search", Name: "search", MiddlewareCount: 4},
+		{Method: "POST", Path: "/submit", Pattern: "POST /submit", Name: "submit", MiddlewareCount: 4},
 	}
 	if !reflect.DeepEqual(routes, want) {
 		t.Fatalf("routes = %#v, want %#v", routes, want)

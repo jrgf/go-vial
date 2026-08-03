@@ -1,6 +1,7 @@
 package vial
 
 import (
+	stdcontext "context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +12,82 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
+
+type requestValuesContextKey struct{}
+type stringRequestValueKey string
+
+type requestValues struct {
+	mu     sync.RWMutex
+	values map[any]any
+}
+
+func (values *requestValues) set(key, value any) {
+	values.mu.Lock()
+	values.values[key] = value
+	values.mu.Unlock()
+}
+
+func (values *requestValues) get(key any) (any, bool) {
+	values.mu.RLock()
+	value, ok := values.values[key]
+	values.mu.RUnlock()
+	return value, ok
+}
+
+// ValueKey is a collision-safe request value key. Keep and reuse the pointer
+// returned by NewValueKey; identity, not the display name, selects the value.
+type ValueKey[T any] struct {
+	name string
+}
+
+// NewValueKey creates a typed request value key.
+func NewValueKey[T any](name string) *ValueKey[T] {
+	return &ValueKey[T]{name: name}
+}
+
+// Name returns the diagnostic name of the key. Names do not affect identity.
+func (key *ValueKey[T]) Name() string {
+	return key.name
+}
+
+// Set stores a value for the current request. Values are safe for concurrent
+// access during the request but should not be retained after it completes.
+func (key *ValueKey[T]) Set(context *Context, value T) {
+	context.values.set(key, value)
+}
+
+// Get returns a typed value from a Vial context.
+func (key *ValueKey[T]) Get(context *Context) (T, bool) {
+	return requestValue[T](context.values, key)
+}
+
+// FromRequest returns the same typed value through the underlying request.
+func (key *ValueKey[T]) FromRequest(request *http.Request) (T, bool) {
+	var zero T
+	if request == nil {
+		return zero, false
+	}
+	values, ok := request.Context().Value(requestValuesContextKey{}).(*requestValues)
+	if !ok || values == nil {
+		return zero, false
+	}
+	return requestValue[T](values, key)
+}
+
+func requestValue[T any](values *requestValues, key *ValueKey[T]) (T, bool) {
+	var zero T
+	if values == nil || key == nil {
+		return zero, false
+	}
+	value, ok := values.get(key)
+	if !ok {
+		return zero, false
+	}
+	typed, ok := value.(T)
+	return typed, ok
+}
 
 // Context contains request-scoped framework state while retaining direct access
 // to the standard net/http request and response writer.
@@ -24,18 +100,30 @@ type Context struct {
 	logger      *slog.Logger
 	bodyLimited bool
 
-	valuesMu sync.RWMutex
-	values   map[string]any
+	values *requestValues
 }
 
 func newContext(app *App, writer *ResponseWriter, request *http.Request) *Context {
+	values := &requestValues{values: make(map[any]any)}
+	request = request.WithContext(stdcontext.WithValue(request.Context(), requestValuesContextKey{}, values))
 	return &Context{
 		app:      app,
 		request:  request,
 		response: writer,
 		logger:   app.config.logger,
-		values:   make(map[string]any),
+		values:   values,
 	}
+}
+
+// ContextFromRequest returns the Vial context attached to a routed request.
+// It lets standard net/http handlers access route metadata without exported
+// context keys that could collide with application values.
+func ContextFromRequest(request *http.Request) (*Context, bool) {
+	if request == nil {
+		return nil, false
+	}
+	contextValue, ok := request.Context().Value(requestContextKey{}).(*Context)
+	return contextValue, ok && contextValue != nil
 }
 
 // App returns the application serving the request.
@@ -50,7 +138,22 @@ func (context *Context) Request() *http.Request {
 
 // Response returns the tracked HTTP response writer.
 func (context *Context) Response() http.ResponseWriter {
-	return context.response
+	return context.response.capabilities
+}
+
+// Flush sends buffered response data when the server supports streaming.
+func (context *Context) Flush() error {
+	return context.ResponseController().Flush()
+}
+
+// SetWriteDeadline sets the response write deadline when supported.
+func (context *Context) SetWriteDeadline(deadline time.Time) error {
+	return context.ResponseController().SetWriteDeadline(deadline)
+}
+
+// ResponseController exposes standard-library optional response operations.
+func (context *Context) ResponseController() *http.ResponseController {
+	return http.NewResponseController(context.Response())
 }
 
 // Route returns metadata for the matched route.
@@ -90,17 +193,12 @@ func (context *Context) SetLogger(logger *slog.Logger) {
 
 // Set stores a request-scoped value.
 func (context *Context) Set(key string, value any) {
-	context.valuesMu.Lock()
-	context.values[key] = value
-	context.valuesMu.Unlock()
+	context.values.set(stringRequestValueKey(key), value)
 }
 
 // Get returns a request-scoped value.
 func (context *Context) Get(key string) (any, bool) {
-	context.valuesMu.RLock()
-	value, ok := context.values[key]
-	context.valuesMu.RUnlock()
-	return value, ok
+	return context.values.get(stringRequestValueKey(key))
 }
 
 // Status returns the response status written so far.
@@ -169,6 +267,13 @@ func (context *Context) Redirect(status int, location string) error {
 // BindJSON decodes a single JSON value into destination using the application's
 // body limit and unknown-field policy.
 func (context *Context) BindJSON(destination any) error {
+	if err := context.bindJSON(destination); err != nil {
+		return err
+	}
+	return validateBinding(destination)
+}
+
+func (context *Context) bindJSON(destination any) error {
 	if destination == nil {
 		return BadRequest("invalid_destination", "JSON destination cannot be nil")
 	}

@@ -3,7 +3,7 @@ COVERAGE_PROFILE ?= .vial/coverage.out
 GOEXE := $(shell go env GOEXE)
 VIAL_BIN ?= bin/vial$(GOEXE)
 
-.PHONY: test coverage race vet examples build install dev check
+.PHONY: test coverage race vet examples benchmark build install dev check
 
 test:
 	go test ./...
@@ -21,6 +21,9 @@ vet:
 
 examples:
 	cd examples/securecookie && go test ./...
+
+benchmark:
+	go test -run '^$$' -bench '^BenchmarkHTTP$$' -benchmem -count=5 .
 
 build:
 	mkdir -p $(dir $(VIAL_BIN))

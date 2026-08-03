@@ -255,6 +255,8 @@ func TestBindJSON(t *testing.T) {
 		wantStatus  int
 	}{
 		{name: "valid", body: `{"name":"Ada"}`, contentType: "application/json", wantStatus: http.StatusOK},
+		{name: "empty body", body: ``, contentType: "application/json", wantStatus: http.StatusBadRequest},
+		{name: "malformed body", body: `{"name":`, contentType: "application/json", wantStatus: http.StatusBadRequest},
 		{name: "unknown field", body: `{"name":"Ada","extra":true}`, contentType: "application/json", wantStatus: http.StatusBadRequest},
 		{name: "multiple values", body: `{"name":"Ada"} {"name":"Grace"}`, contentType: "application/json", wantStatus: http.StatusBadRequest},
 		{name: "wrong type", body: `{"name":3}`, contentType: "application/json", wantStatus: http.StatusBadRequest},
@@ -322,6 +324,120 @@ func TestRawHTTPHandler(t *testing.T) {
 	}
 }
 
+func TestRawHTTPHandlerMiddlewarePipeline(t *testing.T) {
+	app := vial.New()
+	var order []string
+	middleware := func(name string) vial.Middleware {
+		return func(next vial.Handler) vial.Handler {
+			return func(context *vial.Context) error {
+				if name == "app" && (context.Route() == nil || context.Route().Name != "raw") {
+					t.Error("app middleware did not receive route metadata before next")
+				}
+				order = append(order, name+":before")
+				err := next(context)
+				order = append(order, name+":after")
+				return err
+			}
+		}
+	}
+
+	app.Use(middleware("app"))
+	group := app.Group("/api")
+	group.Use(middleware("group"))
+	group.HandleHTTP("GET /raw", http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		order = append(order, "handler")
+		contextValue, ok := vial.ContextFromRequest(request)
+		if !ok || contextValue.Route() == nil || contextValue.Route().Name != "raw" {
+			t.Error("raw handler did not receive route metadata")
+		}
+	}), vial.RouteName("raw"), vial.RouteMiddleware(middleware("route")))
+
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/raw", nil))
+
+	expected := []string{
+		"app:before", "group:before", "route:before", "handler",
+		"route:after", "group:after", "app:after",
+	}
+	if !reflect.DeepEqual(order, expected) {
+		t.Fatalf("unexpected raw middleware order:\nwant %#v\n got %#v", expected, order)
+	}
+}
+
+func TestRawHTTPHandlerMiddlewareCanRejectRequest(t *testing.T) {
+	app := vial.New()
+	called := false
+	app.HandleHTTP("GET /diagnostics", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	}), vial.RouteMiddleware(func(vial.Handler) vial.Handler {
+		return func(*vial.Context) error {
+			return vial.Forbidden("diagnostics_forbidden", "diagnostics access denied")
+		}
+	}))
+
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/diagnostics", nil))
+
+	if called || response.Code != http.StatusForbidden {
+		t.Fatalf("expected middleware rejection before raw handler, called=%v status=%d", called, response.Code)
+	}
+}
+
+func TestStaticFileHandlerCanBeProtected(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "asset.txt"), []byte("protected"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	authenticate := func(next vial.Handler) vial.Handler {
+		return func(context *vial.Context) error {
+			if context.Header("Authorization") != "Bearer test" {
+				return vial.Unauthorized("authentication_required", "authentication required")
+			}
+			return next(context)
+		}
+	}
+	app := vial.New()
+	app.HandleHTTP("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(directory))), vial.RouteMiddleware(authenticate))
+
+	unauthorized := httptest.NewRecorder()
+	app.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/static/asset.txt", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("expected protected static handler to reject request, got %d", unauthorized.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/static/asset.txt", nil)
+	request.Header.Set("Authorization", "Bearer test")
+	authorized := httptest.NewRecorder()
+	app.ServeHTTP(authorized, request)
+	if authorized.Code != http.StatusOK || strings.TrimSpace(authorized.Body.String()) != "protected" {
+		t.Fatalf("unexpected protected static response: status=%d body=%q", authorized.Code, authorized.Body.String())
+	}
+}
+
+func TestStaticFileHandlerPreservesHeadAndRangeRequests(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "asset.txt"), []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app := vial.New()
+	app.HandleHTTP("GET /files/", http.StripPrefix("/files/", http.FileServer(http.Dir(directory))))
+
+	head := httptest.NewRecorder()
+	app.ServeHTTP(head, httptest.NewRequest(http.MethodHead, "/files/asset.txt", nil))
+	if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("Content-Length") != "10" {
+		t.Fatalf("HEAD response: status=%d length=%q body=%q", head.Code, head.Header().Get("Content-Length"), head.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/files/asset.txt", nil)
+	request.Header.Set("Range", "bytes=2-5")
+	partial := httptest.NewRecorder()
+	app.ServeHTTP(partial, request)
+	if partial.Code != http.StatusPartialContent || partial.Body.String() != "2345" || partial.Header().Get("Content-Range") != "bytes 2-5/10" {
+		t.Fatalf("range response: status=%d range=%q body=%q", partial.Code, partial.Header().Get("Content-Range"), partial.Body.String())
+	}
+}
+
 func TestBuildReportsConflictingRoutes(t *testing.T) {
 	app := vial.New()
 	app.Get("/users/{id}", func(*vial.Context) error { return nil })
@@ -329,6 +445,14 @@ func TestBuildReportsConflictingRoutes(t *testing.T) {
 
 	if err := app.Build(); err == nil {
 		t.Fatal("expected route conflict")
+	}
+}
+
+func TestBuildRejectsInvalidRouteMethod(t *testing.T) {
+	app := vial.New()
+	app.Handle(" ", "/items", func(*vial.Context) error { return nil })
+	if err := app.Build(); err == nil || !strings.Contains(err.Error(), "invalid method") {
+		t.Fatalf("invalid route method returned %v", err)
 	}
 }
 
@@ -375,24 +499,26 @@ func TestBuildValidatesRouteNames(t *testing.T) {
 
 func TestRoutesReturnsReadOnlyRegistrationOrder(t *testing.T) {
 	app := vial.New()
+	app.Use(func(next vial.Handler) vial.Handler { return next })
 	app.Get("/users/{id}", func(*vial.Context) error { return nil }, vial.RouteName("users.show"))
-	app.Group("/api").Post("notes", func(*vial.Context) error { return nil }, vial.RouteName("notes.create"))
-	app.HandleHTTP("GET /health", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), vial.RouteName("health"))
+	app.Group("/api").Post("notes", func(*vial.Context) error { return nil }, vial.RouteName("notes.create"), vial.RouteMiddleware(func(next vial.Handler) vial.Handler { return next }))
+	app.HandleHTTP("GET /health/{region}", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), vial.RouteName("health"))
 
 	routes, err := app.Routes()
 	if err != nil {
 		t.Fatalf("routes: %v", err)
 	}
 	want := []vial.Route{
-		{Method: http.MethodGet, Path: "/users/{id}", Pattern: "GET /users/{id}", Name: "users.show"},
-		{Method: http.MethodPost, Path: "/api/notes", Pattern: "POST /api/notes", Name: "notes.create"},
-		{Path: "GET /health", Pattern: "GET /health", Name: "health"},
+		{Method: http.MethodGet, Path: "/users/{id}", Pattern: "GET /users/{id}", Name: "users.show", MiddlewareCount: 1, Parameters: []string{"id"}},
+		{Method: http.MethodPost, Path: "/api/notes", Pattern: "POST /api/notes", Name: "notes.create", MiddlewareCount: 2},
+		{Method: http.MethodGet, Path: "/health/{region}", Pattern: "GET /health/{region}", Name: "health", MiddlewareCount: 1, Parameters: []string{"region"}},
 	}
 	if !reflect.DeepEqual(routes, want) {
 		t.Fatalf("routes = %#v, want %#v", routes, want)
 	}
 
 	routes[0].Path = "/changed"
+	routes[0].Parameters[0] = "changed"
 	again, err := app.Routes()
 	if err != nil {
 		t.Fatalf("routes again: %v", err)
@@ -602,6 +728,35 @@ func TestPublicHTTPHelpersAndContextAccessors(t *testing.T) {
 	}
 }
 
+func TestTypedRequestValuesAreCollisionSafeAndAvailableToNetHTTP(t *testing.T) {
+	first := vial.NewValueKey[string]("shared")
+	second := vial.NewValueKey[int]("shared")
+	app := vial.New()
+	app.HandleHTTP("GET /raw", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		firstValue, firstOK := first.FromRequest(request)
+		secondValue, secondOK := second.FromRequest(request)
+		if !firstOK || firstValue != "one" || !secondOK || secondValue != 2 {
+			t.Errorf("unexpected request values: %q/%v %d/%v", firstValue, firstOK, secondValue, secondOK)
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}), vial.RouteMiddleware(func(next vial.Handler) vial.Handler {
+		return func(context *vial.Context) error {
+			first.Set(context, "one")
+			second.Set(context, 2)
+			if value, ok := first.Get(context); !ok || value != "one" {
+				t.Errorf("unexpected Vial context value %q/%v", value, ok)
+			}
+			return next(context)
+		}
+	}))
+
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/raw", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestNestedGroupHTTPHelpers(t *testing.T) {
 	app := vial.New()
 	group := app.Group("/api").Group("/v1")
@@ -652,6 +807,48 @@ func TestRedirectAndCustomErrorHandler(t *testing.T) {
 	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/error", nil))
 	if response.Code != http.StatusTeapot || response.Body.String() != "handled" {
 		t.Fatalf("unexpected custom error response: status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
+func TestCustomErrorHandlerPanicUsesFrameworkFallback(t *testing.T) {
+	var logs bytes.Buffer
+	app := vial.New(vial.WithLogger(slog.New(slog.NewTextHandler(&logs, nil))))
+	app.Get("/error", func(*vial.Context) error {
+		return errors.New("request exploded")
+	})
+	calls := 0
+	app.SetErrorHandler(func(context *vial.Context, _ error) {
+		calls++
+		context.Response().Header().Set("X-Internal-Detail", "secret")
+		panic("renderer exploded")
+	})
+
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/error", nil))
+
+	if calls != 1 || response.Code != http.StatusInternalServerError || response.Body.String() != "Internal Server Error\n" {
+		t.Fatalf("unexpected fallback: calls=%d status=%d body=%q", calls, response.Code, response.Body.String())
+	}
+	if response.Header().Get("X-Internal-Detail") != "" || strings.Contains(response.Body.String(), "exploded") {
+		t.Fatal("framework fallback exposed custom renderer details")
+	}
+	if output := logs.String(); !strings.Contains(output, "request exploded") || !strings.Contains(output, "renderer exploded") {
+		t.Fatalf("panic log does not contain both failures: %s", output)
+	}
+}
+
+func TestCustomErrorHandlerPanicAfterCommitDoesNotEscape(t *testing.T) {
+	app := vial.New()
+	app.Get("/error", func(*vial.Context) error { return errors.New("boom") })
+	app.SetErrorHandler(func(context *vial.Context, _ error) {
+		_ = context.Text(http.StatusTeapot, "partial")
+		panic("too late")
+	})
+
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/error", nil))
+	if response.Code != http.StatusTeapot || response.Body.String() != "partial" {
+		t.Fatalf("committed response changed after renderer panic: status=%d body=%q", response.Code, response.Body.String())
 	}
 }
 

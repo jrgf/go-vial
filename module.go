@@ -14,7 +14,15 @@ type Module interface {
 // Registrar exposes the route registration surface available to modules.
 type Registrar struct {
 	app    *App
+	root   *App
 	module string
+}
+
+type moduleRegistration struct {
+	routes     []routeDefinition
+	startHooks []LifecycleHook
+	stopHooks  []LifecycleHook
+	tasks      []taskDefinition
 }
 
 // Register stages modules and commits their routes atomically.
@@ -28,18 +36,25 @@ func (app *App) Register(modules ...Module) error {
 
 	names := make([]string, 0, len(modules))
 	routes := make([]routeDefinition, 0)
+	startHooks := make([]LifecycleHook, 0)
+	stopHooks := make([]LifecycleHook, 0)
+	tasks := make([]taskDefinition, 0)
 	for _, module := range modules {
 		if module == nil {
 			return fmt.Errorf("vial: module cannot be nil")
 		}
 
 		name := module.Name()
-		registrar := &Registrar{app: New(), module: name}
+		registrar := &Registrar{app: New(), root: app, module: name}
 		if err := module.Register(registrar); err != nil {
 			return fmt.Errorf("register module %q: %w", name, err)
 		}
+		registration := registrar.close()
 		names = append(names, name)
-		routes = append(routes, registrar.close()...)
+		routes = append(routes, registration.routes...)
+		startHooks = append(startHooks, registration.startHooks...)
+		stopHooks = append(stopHooks, registration.stopHooks...)
+		tasks = append(tasks, registration.tasks...)
 	}
 
 	app.mu.Lock()
@@ -52,6 +67,9 @@ func (app *App) Register(modules ...Module) error {
 	}
 	app.modules = append(app.modules, names...)
 	app.routes = append(app.routes, routes...)
+	app.startHooks = append(app.startHooks, startHooks...)
+	app.stopHooks = append(app.stopHooks, stopHooks...)
+	app.tasks = append(app.tasks, tasks...)
 	return nil
 }
 
@@ -75,7 +93,32 @@ func (registrar *Registrar) HandleHTTP(pattern string, handler http.Handler, opt
 	registrar.app.HandleHTTP(pattern, handler, options...)
 }
 
-func (registrar *Registrar) close() []routeDefinition {
+// OnStart registers module startup hooks.
+func (registrar *Registrar) OnStart(hooks ...LifecycleHook) {
+	registrar.app.OnStart(hooks...)
+}
+
+// OnStop registers module shutdown hooks.
+func (registrar *Registrar) OnStop(hooks ...LifecycleHook) {
+	registrar.app.OnStop(hooks...)
+}
+
+// Go registers a supervised module background task.
+func (registrar *Registrar) Go(name string, task Task, options ...TaskOption) {
+	registrar.app.Go(registrar.module+"."+name, task, options...)
+}
+
+// Health registers a module liveness endpoint.
+func (registrar *Registrar) Health(path string) {
+	registrar.app.Health(path)
+}
+
+// Readiness registers a module readiness endpoint.
+func (registrar *Registrar) Readiness(path string, checks ...HealthCheck) {
+	registrar.app.Get(path, registrar.root.readinessHandler(checks...))
+}
+
+func (registrar *Registrar) close() moduleRegistration {
 	registrar.app.mu.Lock()
 	defer registrar.app.mu.Unlock()
 
@@ -89,5 +132,10 @@ func (registrar *Registrar) close() []routeDefinition {
 		definition.middleware = append(routeMiddleware, definition.middleware...)
 		routes[index] = definition
 	}
-	return routes
+	return moduleRegistration{
+		routes:     routes,
+		startHooks: append([]LifecycleHook(nil), registrar.app.startHooks...),
+		stopHooks:  append([]LifecycleHook(nil), registrar.app.stopHooks...),
+		tasks:      append([]taskDefinition(nil), registrar.app.tasks...),
+	}
 }

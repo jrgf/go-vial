@@ -16,6 +16,22 @@ import (
 
 var testKey = []byte("0123456789abcdef0123456789abcdef")
 
+func FuzzSessionCookieDecode(fuzz *testing.F) {
+	manager, err := newSessionManager(true, testKey)
+	if err != nil {
+		fuzz.Fatal(err)
+	}
+	fuzz.Add("")
+	fuzz.Add("malformed-cookie")
+	fuzz.Fuzz(func(t *testing.T, value string) {
+		if len(value) > maxCookieBytes {
+			t.Skip()
+		}
+		current := newSessionData()
+		_ = securecookie.DecodeMulti(sessionCookieName, value, current, manager.currentCodecs()...)
+	})
+}
+
 func TestSessionAndFlashRoundTrip(t *testing.T) {
 	app := testApp(t, false, testKey)
 	server := httptest.NewServer(app)

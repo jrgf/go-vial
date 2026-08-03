@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -18,7 +19,11 @@ import (
 	"github.com/jrgf/go-vial/internal/load"
 )
 
-var version = "0.12.0"
+var (
+	version        = "0.15.0"
+	commit         = "development"
+	buildGoVersion string
+)
 
 const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
 
@@ -56,14 +61,29 @@ func run(arguments []string) error {
 	case "load":
 		return runLoad(arguments[1:], os.Stdout, os.Stderr)
 	case "version", "--version", "-v":
-		fmt.Println(version)
-		return nil
+		return printVersion(arguments[1:])
 	case "help", "--help", "-h":
 		printUsage()
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", arguments[0])
 	}
+}
+
+func printVersion(arguments []string) error {
+	if len(arguments) == 0 {
+		fmt.Println(version)
+		return nil
+	}
+	if len(arguments) != 1 || arguments[0] != "--verbose" {
+		return fmt.Errorf("usage: vial version [--verbose]")
+	}
+	goVersion := buildGoVersion
+	if goVersion == "" {
+		goVersion = runtime.Version()
+	}
+	fmt.Printf("version=%s\ncommit=%s\ngo=%s\n", version, commit, goVersion)
+	return nil
 }
 
 func runLoad(arguments []string, output, progressOutput io.Writer) error {

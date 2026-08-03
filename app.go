@@ -65,6 +65,8 @@ func New(options ...Option) *App {
 	for _, option := range options {
 		if option != nil {
 			option(&cfg)
+		} else {
+			cfg.invalidOption("Option", "option cannot be nil")
 		}
 	}
 
@@ -150,7 +152,7 @@ func (app *App) HandleHTTP(pattern string, handler http.Handler, options ...Rout
 	if handler == nil {
 		panic("vial: HTTP handler cannot be nil")
 	}
-	definition := newRouteDefinition(Route{Path: pattern, Pattern: pattern}, options)
+	definition := newRouteDefinition(routeFromHTTPPattern(pattern), options)
 	definition.httpHandler = handler
 	app.addRoute(definition)
 }
@@ -183,8 +185,13 @@ func (app *App) Build() error {
 		return app.buildErr
 	}
 	app.state = applicationBuilt
+	if err := app.config.validate(); err != nil {
+		app.buildErr = fmt.Errorf("invalid application configuration: %w", err)
+		return app.buildErr
+	}
 
 	mux := http.NewServeMux()
+	matchedRoutes := make(map[string]Route, len(app.routes))
 	moduleNames := make(map[string]struct{}, len(app.modules))
 	for _, name := range app.modules {
 		if !validRegistrationName(name) {
@@ -206,6 +213,13 @@ func (app *App) Build() error {
 	for index := range app.routes {
 		definition := app.routes[index]
 		route := definition.route
+		route.MiddlewareCount = len(app.middleware) + len(definition.middleware)
+		definition.route = route
+		app.routes[index] = definition
+		if definition.handler != nil && (route.Method == "" || strings.ContainsAny(route.Method, " \t\r\n")) {
+			app.buildErr = fmt.Errorf("route %q has invalid method %q", route.Path, route.Method)
+			return app.buildErr
+		}
 		if definition.hasName {
 			if !validRegistrationName(route.Name) {
 				app.buildErr = fmt.Errorf("route %q has invalid name %q", route.Pattern, route.Name)
@@ -218,16 +232,15 @@ func (app *App) Build() error {
 			names[route.Name] = route
 		}
 
-		var endpoint Handler
-		if definition.handler != nil {
-			endpoint = chain(definition.handler, definition.middleware...)
-		} else {
+		endpoint := definition.handler
+		if endpoint == nil {
 			raw := definition.httpHandler
 			endpoint = func(context *Context) error {
-				raw.ServeHTTP(context.response, context.request)
+				raw.ServeHTTP(context.Response(), context.request)
 				return nil
 			}
 		}
+		endpoint = chain(endpoint, definition.middleware...)
 
 		httpHandler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			contextValue, ok := request.Context().Value(requestContextKey{}).(*Context)
@@ -244,6 +257,7 @@ func (app *App) Build() error {
 			app.buildErr = fmt.Errorf("register route %q: %w", route.Pattern, err)
 			return app.buildErr
 		}
+		matchedRoutes[route.Pattern] = route
 	}
 
 	dispatch := func(contextValue *Context) error {
@@ -256,11 +270,19 @@ func (app *App) Build() error {
 		if err := routeMiss(mux, contextValue.request); err != nil {
 			return err
 		}
-		mux.ServeHTTP(contextValue.response, contextValue.request)
+		mux.ServeHTTP(contextValue.Response(), contextValue.request)
 		return contextValue.routeErr
 	}
 
-	app.compiledRoot = chain(dispatch, app.middleware...)
+	compiled := chain(dispatch, app.middleware...)
+	app.compiledRoot = func(contextValue *Context) error {
+		_, pattern := mux.Handler(contextValue.request)
+		if route, ok := matchedRoutes[pattern]; ok {
+			matched := route
+			contextValue.route = &matched
+		}
+		return compiled(contextValue)
+	}
 	return nil
 }
 
@@ -277,6 +299,7 @@ func (app *App) Routes() ([]Route, error) {
 	routes := make([]Route, len(app.routes))
 	for index := range app.routes {
 		routes[index] = app.routes[index].route
+		routes[index].Parameters = append([]string(nil), app.routes[index].route.Parameters...)
 	}
 	return routes, nil
 }
@@ -324,6 +347,6 @@ func (app *App) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	defer contextValue.cleanup()
 	if err := root(contextValue); err != nil {
 		applyHTTPErrorHeaders(contextValue, err)
-		errorHandler(contextValue, err)
+		renderErrorSafely(contextValue, err, errorHandler)
 	}
 }

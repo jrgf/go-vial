@@ -83,6 +83,22 @@ func (group *Group) Handle(method, path string, handler Handler, options ...Rout
 		Pattern: routePattern(method, fullPath),
 	}, options)
 	definition.handler = handler
-	definition.middleware = append([]Middleware(nil), group.middleware...)
+	definition.middleware = append(append([]Middleware(nil), group.middleware...), definition.middleware...)
+	group.app.addRoute(definition)
+}
+
+// HandleHTTP registers a standard library handler under the group's prefix.
+func (group *Group) HandleHTTP(pattern string, handler http.Handler, options ...RouteOption) {
+	if handler == nil {
+		panic("vial: HTTP handler cannot be nil")
+	}
+
+	pattern = strings.TrimSpace(pattern)
+	if slash := strings.IndexByte(pattern, '/'); slash >= 0 {
+		pattern = pattern[:slash] + joinPath(group.prefix, pattern[slash:])
+	}
+	definition := newRouteDefinition(routeFromHTTPPattern(pattern), options)
+	definition.httpHandler = handler
+	definition.middleware = append(append([]Middleware(nil), group.middleware...), definition.middleware...)
 	group.app.addRoute(definition)
 }

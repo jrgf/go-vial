@@ -18,6 +18,9 @@ func TestRequestIDUsesIncomingValue(t *testing.T) {
 	app := vial.New()
 	app.Use(middleware.RequestID())
 	app.Get("/", func(context *vial.Context) error {
+		if got := middleware.RequestIDFromRequest(context.Request()); got != "request-123" {
+			t.Errorf("request context ID=%q", got)
+		}
 		return context.Text(http.StatusOK, middleware.RequestIDFromContext(context))
 	})
 

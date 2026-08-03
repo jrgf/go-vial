@@ -1,18 +1,82 @@
 package vial_test
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jrgf/go-vial"
+	"github.com/jrgf/go-vial/testkit"
 )
 
 type testModule struct {
 	name     string
 	register func(*vial.Registrar) error
+}
+
+func TestModulesRegisterLifecycleAndTasks(t *testing.T) {
+	var started atomic.Bool
+	var stopped atomic.Bool
+	taskStarted := make(chan struct{})
+	module := testModule{name: "workers", register: func(registrar *vial.Registrar) error {
+		registrar.OnStart(func(context.Context) error {
+			started.Store(true)
+			return nil
+		})
+		registrar.OnStop(func(context.Context) error {
+			stopped.Store(true)
+			return nil
+		})
+		registrar.Go("notifications", func(context context.Context) error {
+			close(taskStarted)
+			<-context.Done()
+			return nil
+		})
+		registrar.Health("/healthz")
+		registrar.Readiness("/readyz", func(context.Context) error { return nil })
+		return nil
+	}}
+
+	app := vial.New()
+	if err := app.Register(module); err != nil {
+		t.Fatal(err)
+	}
+	server := testkit.Start(t, app)
+	select {
+	case <-taskStarted:
+	case <-time.After(time.Second):
+		t.Fatal("module task did not start")
+	}
+	if !started.Load() {
+		t.Fatal("module startup hook did not run")
+	}
+	response, err := server.Client.Get(server.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("module health status=%d", response.StatusCode)
+	}
+	response, err = server.Client.Get(server.URL + "/readyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("module readiness status=%d", response.StatusCode)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !stopped.Load() {
+		t.Fatal("module shutdown hook did not run")
+	}
 }
 
 func (module testModule) Name() string {
@@ -40,6 +104,12 @@ func TestModulesRegisterRoutesAndMiddleware(t *testing.T) {
 		return nil
 	}}
 	health := testModule{name: "health", register: func(registrar *vial.Registrar) error {
+		registrar.Use(func(next vial.Handler) vial.Handler {
+			return func(context *vial.Context) error {
+				context.Response().Header().Set("X-Module", "health")
+				return next(context)
+			}
+		})
 		registrar.HandleHTTP("GET /health", http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 			writer.WriteHeader(http.StatusNoContent)
 		}), vial.RouteName("health"))
@@ -66,7 +136,7 @@ func TestModulesRegisterRoutesAndMiddleware(t *testing.T) {
 
 	healthResponse := httptest.NewRecorder()
 	app.ServeHTTP(healthResponse, httptest.NewRequest(http.MethodGet, "/health", nil))
-	if healthResponse.Code != http.StatusNoContent || healthResponse.Header().Get("X-Module") != "" {
+	if healthResponse.Code != http.StatusNoContent || healthResponse.Header().Get("X-Module") != "health" {
 		t.Fatalf("unexpected health response: status=%d headers=%v", healthResponse.Code, healthResponse.Header())
 	}
 }

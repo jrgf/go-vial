@@ -114,8 +114,8 @@ func (app *App) runLifecycle(parent context.Context, components ...lifecycleComp
 		}
 	}
 
-	cancelRun()
 	app.setState(applicationStopping)
+	cancelRun()
 	shutdownContext, cancelShutdown := context.WithTimeout(
 		context.Background(),
 		app.config.shutdownTimeout,

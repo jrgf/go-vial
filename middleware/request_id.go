@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -11,12 +12,11 @@ import (
 	"github.com/jrgf/go-vial"
 )
 
-const (
-	// RequestIDHeader is the HTTP header used to carry request IDs.
-	RequestIDHeader = "X-Request-ID"
-	// RequestIDKey is the context key used to store request IDs.
-	RequestIDKey = "request_id"
-)
+// RequestIDHeader is the HTTP header used to carry request IDs.
+const RequestIDHeader = "X-Request-ID"
+
+// RequestIDKey is the collision-safe request ID value key.
+var RequestIDKey = vial.NewValueKey[string]("request_id")
 
 var fallbackRequestID atomic.Uint64
 
@@ -29,7 +29,7 @@ func RequestID() vial.Middleware {
 				requestID = newRequestID()
 			}
 
-			context.Set(RequestIDKey, requestID)
+			RequestIDKey.Set(context, requestID)
 			context.SetLogger(context.Logger().With("request_id", requestID))
 			context.Response().Header().Set(RequestIDHeader, requestID)
 			return next(context)
@@ -39,11 +39,13 @@ func RequestID() vial.Middleware {
 
 // RequestIDFromContext returns the request ID installed by RequestID.
 func RequestIDFromContext(context *vial.Context) string {
-	value, ok := context.Get(RequestIDKey)
-	if !ok {
-		return ""
-	}
-	requestID, _ := value.(string)
+	requestID, _ := RequestIDKey.Get(context)
+	return requestID
+}
+
+// RequestIDFromRequest returns the request ID through standard net/http.
+func RequestIDFromRequest(request *http.Request) string {
+	requestID, _ := RequestIDKey.FromRequest(request)
 	return requestID
 }
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 )
 
 const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
@@ -31,6 +32,15 @@ func (app *App) Run(contextValue context.Context, address string) error {
 		}
 		return nil
 	}
+	if strings.TrimSpace(address) == "" {
+		return fmt.Errorf("Run address: address cannot be empty")
+	}
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		return fmt.Errorf("Run address %q: %w", address, err)
+	}
+	if err := app.Build(); err != nil {
+		return err
+	}
 
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -42,6 +52,12 @@ func (app *App) Run(contextValue context.Context, address string) error {
 // Serve runs the application on an existing listener. This is useful for tests
 // and for callers that need custom listener configuration.
 func (app *App) Serve(contextValue context.Context, listener net.Listener) (serveErr error) {
+	if listener == nil {
+		return fmt.Errorf("Serve listener: listener cannot be nil")
+	}
+	if err := app.Build(); err != nil {
+		return err
+	}
 	if contextValue == nil {
 		contextValue = context.Background()
 	}
@@ -62,6 +78,10 @@ func (app *App) Serve(contextValue context.Context, listener net.Listener) (serv
 			ReadTimeout:       app.config.readTimeout,
 			WriteTimeout:      app.config.writeTimeout,
 			IdleTimeout:       app.config.idleTimeout,
+			MaxHeaderBytes:    app.config.maxHeaderBytes,
+			BaseContext:       app.config.baseContext,
+			ConnContext:       app.config.connContext,
+			ErrorLog:          app.config.serverErrorLog,
 		},
 		done:   make(chan error, 1),
 		logger: app.config.logger,

@@ -40,6 +40,29 @@ func (err *HTTPError) Unwrap() error {
 // ErrorHandler renders errors returned by handlers or middleware.
 type ErrorHandler func(*Context, error)
 
+func renderErrorSafely(context *Context, requestErr error, handler ErrorHandler) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			context.Logger().Error(
+				"custom error handler panicked",
+				"request_error", requestErr,
+				"panic", recovered,
+			)
+			if context.Committed() {
+				return
+			}
+			for key := range context.response.Header() {
+				context.response.Header().Del(key)
+			}
+			context.response.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			context.response.Header().Set("X-Content-Type-Options", "nosniff")
+			context.response.WriteHeader(http.StatusInternalServerError)
+			_, _ = context.response.Write([]byte("Internal Server Error\n"))
+		}
+	}()
+	handler(context, requestErr)
+}
+
 // NewHTTPError creates an HTTP error with a stable status, code, and message.
 func NewHTTPError(status int, code, message string) *HTTPError {
 	return &HTTPError{Status: status, Code: code, Message: message}

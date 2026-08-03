@@ -2,12 +2,14 @@ package testkit_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jrgf/go-vial"
 	"github.com/jrgf/go-vial/testkit"
@@ -81,6 +83,33 @@ func TestServerRunsLifecycleAndHTTPRequests(t *testing.T) {
 	}
 	if !stopped.Load() {
 		t.Fatal("shutdown hook was not run")
+	}
+}
+
+func TestServerRequestTimeout(t *testing.T) {
+	app := vial.New()
+	app.Get("/blocked", func(context *vial.Context) error {
+		<-context.Request().Context().Done()
+		return nil
+	})
+	server := testkit.Start(t, app, testkit.WithTimeout(30*time.Millisecond))
+	if server.Client.Timeout != 30*time.Millisecond {
+		t.Fatalf("timeout=%s", server.Client.Timeout)
+	}
+	_, err := server.Client.Get(server.URL + "/blocked")
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("blocked request returned %v", err)
+	}
+}
+
+func TestServerTimeoutDefaultsAndCanBeDisabled(t *testing.T) {
+	defaultServer := testkit.Start(t, vial.New())
+	if defaultServer.Client.Timeout <= 0 {
+		t.Fatal("testkit client has no default timeout")
+	}
+	disabled := testkit.Start(t, vial.New(), testkit.WithTimeout(0))
+	if disabled.Client.Timeout != 0 {
+		t.Fatalf("disabled timeout=%s", disabled.Client.Timeout)
 	}
 }
 

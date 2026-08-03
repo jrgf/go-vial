@@ -8,20 +8,22 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.26.x'
 
       - name: Resolve release version
         id: release
@@ -32,6 +34,10 @@ jobs:
           version="$(go run ./cmd/vial version)"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "invalid semantic version: $version" >&2
+            exit 1
+          fi
+          if ! grep -Fqx "## $version" CHANGELOG.md && ! grep -Fqx "## [$version]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no release heading for $version" >&2
             exit 1
           fi
           tag="v$version"
@@ -46,16 +52,55 @@ jobs:
       - name: Build binaries
         if: steps.release.outputs.exists == 'false'
         shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          COMMIT: ${{ github.event.workflow_run.head_sha }}
         run: |
           mkdir -p dist
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-            os="${target%/*}"
-            arch="${target#*/}"
-            extension=""
-            [ "$os" = windows ] && extension=".exe"
-            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-              -o "dist/vial-${os}-${arch}${extension}" ./cmd/vial
+          mkdir -p /tmp/vial-repro
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$COMMIT")"
+          go_version="$(go env GOVERSION)"
+          ldflags="-s -w -buildid= -X main.version=$VERSION -X main.commit=$COMMIT -X main.buildGoVersion=$go_version"
+          build_all() {
+            destination="$1"
+            for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+              os="${target%/*}"
+              arch="${target#*/}"
+              extension=""
+              [ "$os" = windows ] && extension=".exe"
+              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -buildvcs=false \
+                -ldflags "$ldflags" -o "$destination/vial-${os}-${arch}${extension}" ./cmd/vial
+            done
+          }
+          build_all dist
+          build_all /tmp/vial-repro
+          for artifact in dist/vial-*; do
+            cmp "$artifact" "/tmp/vial-repro/${artifact#dist/}"
           done
+          cp CHANGELOG.md dist/CHANGELOG.md
+
+      - name: Generate SBOM
+        if: steps.release.outputs.exists == 'false'
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: dist
+          output-file: dist/vial-sbom.spdx.json
+          format: spdx-json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate checksums
+        if: steps.release.outputs.exists == 'false'
+        shell: bash
+        run: |
+          cd dist
+          sha256sum vial-* CHANGELOG.md > checksums.txt
+
+      - name: Attest release artifacts
+        if: steps.release.outputs.exists == 'false'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/*
 
       - name: Create release
         if: steps.release.outputs.exists == 'false'

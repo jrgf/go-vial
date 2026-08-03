@@ -8,10 +8,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jrgf/go-vial"
 	"github.com/jrgf/go-vial/fault"
@@ -21,6 +23,41 @@ var errInvalidForm = errors.New("invalid form")
 
 type validatedForm struct {
 	Name string `form:"name"`
+}
+
+type bindingValidationProbe struct {
+	ID     string `path:"id"`
+	Shared string `path:"shared" query:"shared" header:"X-Shared" cookie:"shared" json:"shared"`
+	Name   string `json:"name"`
+	Calls  int    `json:"-"`
+}
+
+func (request *bindingValidationProbe) Validate() error {
+	request.Calls++
+	if request.ID == "" || request.Shared == "" || request.Name == "" {
+		return errors.New("missing request value")
+	}
+	return nil
+}
+
+type sourceValidationProbe struct {
+	Value string `path:"value" query:"value"`
+	Calls int    `json:"-"`
+}
+
+func (request *sourceValidationProbe) Validate() error {
+	request.Calls++
+	return nil
+}
+
+type testID string
+
+func (id *testID) UnmarshalText(value []byte) error {
+	if len(value) != 36 {
+		return errors.New("invalid ID")
+	}
+	*id = testID(value)
+	return nil
 }
 
 func (form *validatedForm) Validate() error {
@@ -118,6 +155,83 @@ func TestBindCombinesRequestSources(t *testing.T) {
 	}
 	if response.Code != http.StatusOK || !reflect.DeepEqual(got, want) {
 		t.Fatalf("combined binding: status=%d payload=%#v, want %#v", response.Code, got, want)
+	}
+}
+
+func TestBindUsesDocumentedPrecedenceAndValidatesOnce(t *testing.T) {
+	app := vial.New()
+	var got bindingValidationProbe
+	app.Post("/items/{id}/{shared}", func(context *vial.Context) error {
+		if err := context.Bind(&got); err != nil {
+			return err
+		}
+		return context.NoContent(http.StatusNoContent)
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/items/path-id/path-shared?shared=query", strings.NewReader(`{"ID":"body-id","shared":"body-shared","name":"Vial"}`))
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	request.Header.Set("X-Shared", "header")
+	request.AddCookie(&http.Cookie{Name: "shared", Value: "cookie"})
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent || got.ID != "path-id" || got.Shared != "path-shared" || got.Name != "Vial" || got.Calls != 1 {
+		t.Fatalf("unexpected binding result: status=%d request=%#v", response.Code, got)
+	}
+}
+
+func TestSourceBindersValidate(t *testing.T) {
+	tests := []struct {
+		name   string
+		route  string
+		target string
+		bind   func(*vial.Context, any) error
+	}{
+		{name: "query", route: "/", target: "/?value=query", bind: (*vial.Context).BindQuery},
+		{name: "path", route: "/{value}", target: "/path", bind: (*vial.Context).BindPath},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app := vial.New()
+			var got sourceValidationProbe
+			app.Get(test.route, func(context *vial.Context) error {
+				if err := test.bind(context, &got); err != nil {
+					return err
+				}
+				return context.NoContent(http.StatusNoContent)
+			})
+			response := httptest.NewRecorder()
+			app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.target, nil))
+			if response.Code != http.StatusNoContent || got.Value == "" || got.Calls != 1 {
+				t.Fatalf("unexpected source binding result: status=%d request=%#v", response.Code, got)
+			}
+		})
+	}
+}
+
+func TestBindQuerySupportsTextUnmarshalersAndPointers(t *testing.T) {
+	values := url.Values{
+		"id":  {"123e4567-e89b-12d3-a456-426614174000"},
+		"ref": {"123e4567-e89b-12d3-a456-426614174001"},
+		"at":  {"2026-08-03T12:30:00Z"},
+	}
+	var got struct {
+		ID  testID    `query:"id"`
+		Ref *testID   `query:"ref"`
+		At  time.Time `query:"at"`
+	}
+	app := vial.New()
+	app.Get("/", func(context *vial.Context) error {
+		if err := context.BindQuery(&got); err != nil {
+			return err
+		}
+		return context.NoContent(http.StatusNoContent)
+	})
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/?"+values.Encode(), nil))
+
+	if response.Code != http.StatusNoContent || got.Ref == nil || got.ID != testID(values.Get("id")) || *got.Ref != testID(values.Get("ref")) || !got.At.Equal(time.Date(2026, 8, 3, 12, 30, 0, 0, time.UTC)) {
+		t.Fatalf("unexpected custom scalar result: status=%d value=%#v", response.Code, got)
 	}
 }
 
@@ -316,7 +430,7 @@ func TestBindFormValidatesAndPreservesFields(t *testing.T) {
 	}{
 		{name: "valid", body: "name=Ada", wantStatus: http.StatusNoContent},
 		{name: "fields", wantStatus: http.StatusBadRequest, wantBody: `"fields":{"name":"required"}`},
-		{name: "plain error", body: "name=broken", wantStatus: http.StatusBadRequest, wantBody: `"code":"invalid_form"`},
+		{name: "plain error", body: "name=broken", wantStatus: http.StatusBadRequest, wantBody: `"code":"validation_failed"`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

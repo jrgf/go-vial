@@ -17,7 +17,6 @@ import (
 
 const (
 	sessionCookieName = "vial_session"
-	sessionContextKey = "example.securecookie.session"
 	sessionMaxAge     = 5 * time.Minute
 	keyRefreshEvery   = time.Minute
 	maxCookieBytes    = 4096
@@ -27,6 +26,8 @@ type sessionData struct {
 	Values  map[string]string `json:"values,omitempty"`
 	Flashes []string          `json:"flashes,omitempty"`
 }
+
+var sessionContextKey = vial.NewValueKey[*sessionData]("securecookie_session")
 
 type sessionManager struct {
 	mu     sync.RWMutex
@@ -222,20 +223,16 @@ func (manager *sessionManager) middleware() vial.Middleware {
 			if current.Values == nil {
 				current.Values = make(map[string]string)
 			}
-			context.Set(sessionContextKey, current)
+			sessionContextKey.Set(context, current)
 			return next(context)
 		}
 	}
 }
 
 func (manager *sessionManager) from(context *vial.Context) (*sessionData, error) {
-	value, ok := context.Get(sessionContextKey)
+	current, ok := sessionContextKey.Get(context)
 	if !ok {
 		return nil, errors.New("securecookie example: session middleware is not installed")
-	}
-	current, ok := value.(*sessionData)
-	if !ok {
-		return nil, errors.New("securecookie example: invalid request session")
 	}
 	return current, nil
 }

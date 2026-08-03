@@ -1,25 +1,25 @@
-
-> [!WARNING]
-> This is a learning/pet project  in which I have used AI. If you are uncomfortable with the use of AI this is not the place for you. Of course there will be slop in places I tried to erradicate the most of it,but surely there is.
-> My solely goal with this project is to level up in Go and create a light and easy framework to create web apps. If you feel this suits your needs feel free to use it and contribute to the project
-
-
-# vial
+# Vial
 
 [![CI](https://github.com/jrgf/go-vial/actions/workflows/ci.yml/badge.svg)](https://github.com/jrgf/go-vial/actions/workflows/ci.yml)
 
-`vial` is an early Go web-framework MVP focused on two things:
+Vial is a Flask-inspired application framework built for Go and the standard
+`net/http` ecosystem. It combines explicit routing and errors, supervised
+lifecycle and background tasks, production-bounded HTTP defaults, testing
+helpers, and a fast rebuild loop without replacing Go's HTTP primitives.
 
-1. A small, explicit HTTP API built directly on `net/http`.
-2. A fast development loop that rebuilds and restarts the application after source changes.
+Choose Vial when standard handlers, middleware, listeners, request contexts,
+response writers, and `httptest` must remain first-class integration points.
+Its runtime has no dependencies outside the standard library.
 
-## Current MVP
+## Capabilities
 
 - Error-returning handlers: `func(*vial.Context) error`
 - Standard Go middleware composition
 - Named, method-aware routes and path parameters through `http.ServeMux`
 - Route groups with scoped middleware
 - Named application modules with isolated route registrars
+- Collision-safe typed context values and trusted-proxy client IPs
+- Supervised startup, shutdown, background tasks, liveness, and readiness
 - JSON, text, redirects, and empty responses
 - Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
@@ -31,6 +31,22 @@
 - `vial load` bounded HTTP load checks and CI thresholds
 - Last-known-good process remains online after compilation failures
 - No runtime dependencies outside the Go standard library
+
+## Examples by depth
+
+1. **Quickstart:** [`examples/hello`](examples/hello) is the smallest runnable
+   app and development-loop introduction.
+2. **API application:** [`examples/json-api`](examples/json-api) demonstrates
+   JSON binding and errors; the focused module, task, upload, event-stream,
+   config, secure-cookie, CSRF, and template examples add one concern at a time.
+
+## Project status
+
+Vial is pre-1.0 while the public API and production evidence are finalized.
+The project began as a learning project and uses AI-assisted contributions;
+changes are expected to meet the same tests, review, security reporting, and
+compatibility policy as other contributions. Review release notes before using
+a pre-1.0 version in production.
 
 ## Run it
 
@@ -479,16 +495,22 @@ go vet ./...
 
 The codebase is also compile-checked for Windows and macOS in CI.
 
-## Known MVP limitations
+## Known limitations
 
 - Development change detection uses recursive polling rather than native filesystem events.
 - Only Go source and module/workspace files trigger rebuilds.
 - Windows child replacement uses direct termination; graceful console-event delivery is a later enhancement.
 - Route registration becomes immutable after the application is built or first served.
 
+## Go support
+
+Vial supports the current and previous supported Go releases. The current
+minimum is Go 1.25.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, quality requirements, and pull request guidance.
+Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 
 ## License
 

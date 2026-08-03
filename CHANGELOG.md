@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+## 0.15.0
+
+- Correct raw-handler middleware, binding precedence and validation, optional
+  response-writer interfaces, renderer recovery, strict options, CSRF defaults,
+  and bounded testkit requests.
+- Stabilize modules, typed request values, trusted proxy and client IP handling,
+  route metadata and names, server options, liveness and readiness, and Go
+  support.
+- Add fuzzing, benchmarks, pinned CI and security checks, reproducible artifacts,
+  checksums, SBOM, and provenance.
+
 ## 0.12.0
 
 - Complete public API documentation and a fresh external-module compatibility test

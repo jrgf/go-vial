@@ -19,7 +19,7 @@ func TestPublicPackagesFromExternalModule(t *testing.T) {
 	directory := t.TempDir()
 	goMod := fmt.Sprintf(`module example.com/vial-compatibility
 
-go 1.23.0
+go 1.25.0
 
 require github.com/jrgf/go-vial v0.0.0
 

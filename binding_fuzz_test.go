@@ -70,3 +70,33 @@ func FuzzBindURLForm(fuzz *testing.F) {
 		}
 	})
 }
+
+func FuzzBindJSON(fuzz *testing.F) {
+	fuzz.Add(`{"name":"Ada","age":36}`)
+	fuzz.Add(`{"name":`)
+	fuzz.Add(`null`)
+
+	fuzz.Fuzz(func(t *testing.T, body string) {
+		if len(body) > 64<<10 {
+			t.Skip()
+		}
+		app := New(WithDisallowUnknownJSONFields(true))
+		app.Post("/", func(context *Context) error {
+			var value struct {
+				Name string `json:"name" validate:"required"`
+				Age  uint8  `json:"age"`
+			}
+			if err := context.BindJSON(&value); err != nil {
+				return err
+			}
+			return context.NoContent(http.StatusNoContent)
+		})
+		request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		app.ServeHTTP(response, request)
+		if response.Code != http.StatusNoContent && response.Code != http.StatusBadRequest {
+			t.Fatalf("unexpected status %d", response.Code)
+		}
+	})
+}

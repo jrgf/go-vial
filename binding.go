@@ -1,6 +1,7 @@
 package vial
 
 import (
+	"encoding"
 	"errors"
 	"fmt"
 	"mime"
@@ -52,37 +53,49 @@ func (err *BindingError) Unwrap() error {
 
 // Bind combines tagged path, query, header, cookie, JSON, and form input.
 func (context *Context) Bind(destination any) error {
+	contentType := context.request.Header.Get("Content-Type")
+	if contentType != "" {
+		mediaType, _, err := mime.ParseMediaType(contentType)
+		if err != nil {
+			return UnsupportedMediaType("unsupported_media_type", "Content-Type is invalid")
+		}
+		switch {
+		case mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"):
+			if err := context.bindJSONPreservingExplicitFields(destination); err != nil {
+				return err
+			}
+		case mediaType == "application/x-www-form-urlencoded" || mediaType == "multipart/form-data":
+			if err := context.bindForm(destination); err != nil {
+				return err
+			}
+		default:
+			return UnsupportedMediaType("unsupported_media_type", "Content-Type is not supported for binding")
+		}
+	}
+
+	// Later sources win: path > query > header > cookie > request body.
 	for _, bind := range []func(any) error{
-		context.BindPath,
-		context.BindQuery,
-		context.BindHeader,
-		context.BindCookie,
+		context.bindCookie,
+		context.bindHeader,
+		context.bindQuery,
+		context.bindPath,
 	} {
 		if err := bind(destination); err != nil {
 			return err
 		}
 	}
-
-	contentType := context.request.Header.Get("Content-Type")
-	if contentType == "" {
-		return nil
-	}
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		return UnsupportedMediaType("unsupported_media_type", "Content-Type is invalid")
-	}
-	switch {
-	case mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"):
-		return context.BindJSON(destination)
-	case mediaType == "application/x-www-form-urlencoded" || mediaType == "multipart/form-data":
-		return context.BindForm(destination)
-	default:
-		return UnsupportedMediaType("unsupported_media_type", "Content-Type is not supported for binding")
-	}
+	return validateBinding(destination)
 }
 
 // BindPath binds route parameters to fields tagged with `path`.
 func (context *Context) BindPath(destination any) error {
+	if err := context.bindPath(destination); err != nil {
+		return err
+	}
+	return validateBinding(destination)
+}
+
+func (context *Context) bindPath(destination any) error {
 	return bindRequestValues(destination, "path", "invalid_path", "Path parameters contain invalid values", func(name string) ([]string, bool) {
 		value := context.request.PathValue(name)
 		return []string{value}, value != ""
@@ -92,11 +105,25 @@ func (context *Context) BindPath(destination any) error {
 // BindQuery binds query parameters to primitive struct fields tagged with
 // `query`. Repeated values bind to slices.
 func (context *Context) BindQuery(destination any) error {
+	if err := context.bindQuery(destination); err != nil {
+		return err
+	}
+	return validateBinding(destination)
+}
+
+func (context *Context) bindQuery(destination any) error {
 	return bindValues(destination, "query", "invalid_query", "Query parameters contain invalid values", context.request.URL.Query())
 }
 
 // BindHeader binds request headers to fields tagged with `header`.
 func (context *Context) BindHeader(destination any) error {
+	if err := context.bindHeader(destination); err != nil {
+		return err
+	}
+	return validateBinding(destination)
+}
+
+func (context *Context) bindHeader(destination any) error {
 	return bindRequestValues(destination, "header", "invalid_header", "Request headers contain invalid values", func(name string) ([]string, bool) {
 		values := context.request.Header.Values(name)
 		return values, len(values) > 0
@@ -105,6 +132,13 @@ func (context *Context) BindHeader(destination any) error {
 
 // BindCookie binds request cookies to fields tagged with `cookie`.
 func (context *Context) BindCookie(destination any) error {
+	if err := context.bindCookie(destination); err != nil {
+		return err
+	}
+	return validateBinding(destination)
+}
+
+func (context *Context) bindCookie(destination any) error {
 	return bindRequestValues(destination, "cookie", "invalid_cookie", "Request cookies contain invalid values", func(name string) ([]string, bool) {
 		values := make([]string, 0, 1)
 		for _, cookie := range context.request.Cookies() {
@@ -119,25 +153,18 @@ func (context *Context) BindCookie(destination any) error {
 // BindForm binds URL-encoded or multipart form fields to primitive struct
 // fields tagged with `form`. Repeated values bind to slices.
 func (context *Context) BindForm(destination any) error {
+	if err := context.bindForm(destination); err != nil {
+		return err
+	}
+	return validateBinding(destination)
+}
+
+func (context *Context) bindForm(destination any) error {
 	values, err := context.parseForm()
 	if err != nil {
 		return err
 	}
-	if err := bindValues(destination, "form", "invalid_form", "Form contains invalid values", values); err != nil {
-		return err
-	}
-	validator, ok := destination.(Validator)
-	if !ok {
-		return nil
-	}
-	if err := validator.Validate(); err != nil {
-		var faultErr *fault.Error
-		if errors.As(err, &faultErr) && faultErr != nil {
-			return err
-		}
-		return fault.Wrap(fault.InvalidArgument, "invalid_form", "Form contains invalid values", err)
-	}
-	return nil
+	return bindValues(destination, "form", "invalid_form", "Form contains invalid values", values)
 }
 
 // FormValue returns the first URL-encoded or multipart form value for name.
@@ -255,7 +282,43 @@ type bindingField struct {
 }
 
 type bindingMetadata struct {
-	fields map[string][]bindingField
+	fields             map[string][]bindingField
+	implicitJSONFields []int
+}
+
+func (context *Context) bindJSONPreservingExplicitFields(destination any) error {
+	value := reflect.ValueOf(destination)
+	if destination == nil || value.Kind() != reflect.Pointer || value.IsNil() || value.Elem().Kind() != reflect.Struct {
+		return context.bindJSON(destination)
+	}
+
+	value = value.Elem()
+	indexes := bindingMetadataFor(value.Type()).implicitJSONFields
+	saved := make([]reflect.Value, len(indexes))
+	for index, fieldIndex := range indexes {
+		saved[index] = reflect.New(value.Field(fieldIndex).Type()).Elem()
+		saved[index].Set(value.Field(fieldIndex))
+	}
+	err := context.bindJSON(destination)
+	for index, fieldIndex := range indexes {
+		value.Field(fieldIndex).Set(saved[index])
+	}
+	return err
+}
+
+func validateBinding(destination any) error {
+	validator, ok := destination.(Validator)
+	if !ok {
+		return nil
+	}
+	if err := validator.Validate(); err != nil {
+		var faultErr *fault.Error
+		if errors.As(err, &faultErr) && faultErr != nil {
+			return err
+		}
+		return fault.Wrap(fault.InvalidArgument, "validation_failed", "Request values are invalid", err)
+	}
+	return nil
 }
 
 func bindValues(destination any, source, code, message string, values url.Values) error {
@@ -300,12 +363,17 @@ func bindingMetadataFor(valueType reflect.Type) *bindingMetadata {
 		if !fieldType.IsExported() {
 			continue
 		}
+		explicitSource := false
 		for _, source := range bindingSources {
 			name, _, _ := strings.Cut(fieldType.Tag.Get(source), ",")
 			if name == "" || name == "-" {
 				continue
 			}
+			explicitSource = true
 			metadata.fields[source] = append(metadata.fields[source], bindingField{index: index, name: name})
+		}
+		if _, hasJSONTag := fieldType.Tag.Lookup("json"); explicitSource && !hasJSONTag {
+			metadata.implicitJSONFields = append(metadata.implicitJSONFields, index)
 		}
 	}
 
@@ -340,6 +408,19 @@ func setField(field reflect.Value, values []string) error {
 }
 
 func setScalar(field reflect.Value, value string) error {
+	if field.Kind() == reflect.Pointer {
+		if field.IsNil() {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+		if field.Type().Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) {
+			return field.Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(value))
+		}
+		return setScalar(field.Elem(), value)
+	}
+	if field.CanAddr() && field.Addr().Type().Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) {
+		return field.Addr().Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(value))
+	}
+
 	switch field.Kind() {
 	case reflect.String:
 		field.SetString(value)
