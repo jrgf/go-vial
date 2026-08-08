@@ -75,15 +75,16 @@ jobs:
       - name: Fuzz framework parsers
         shell: bash
         run: |
+          # Go <=1.26 can report the normal fuzz deadline as a failure (go.dev/issue/75804).
           for target in FuzzSetScalar FuzzBindURLForm FuzzBindJSON FuzzClientIPForwarding FuzzRoutePatternRegistration; do
-            go test -run '^$' -fuzz "^${target}$" -fuzztime 5s .
+            go test -run '^$' -fuzz "^${target}$" -fuzztime 100000x .
           done
-          go test -run '^$' -fuzz '^FuzzSetText$' -fuzztime 5s ./config
+          go test -run '^$' -fuzz '^FuzzSetText$' -fuzztime 100000x ./config
           for target in FuzzNormalizeOrigin FuzzCSRFTokenParsing; do
-            go test -run '^$' -fuzz "^${target}$" -fuzztime 5s ./middleware
+            go test -run '^$' -fuzz "^${target}$" -fuzztime 100000x ./middleware
           done
           cd examples/securecookie
-          go test -run '^$' -fuzz '^FuzzSessionCookieDecode$' -fuzztime 5s .
+          go test -run '^$' -fuzz '^FuzzSessionCookieDecode$' -fuzztime 100000x .
 
   benchmark:
     runs-on: ubuntu-latest
