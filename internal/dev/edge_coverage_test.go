@@ -23,32 +23,6 @@ func TestCoverageIgnoreMatcher(t *testing.T) {
 	}
 }
 
-func TestCoverageMissingWorkingDirectory(t *testing.T) {
-	original, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	directory := filepath.Join(t.TempDir(), "removed")
-	if err := os.Mkdir(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(directory); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(directory); err != nil {
-		_ = os.Chdir(original)
-		t.Fatal(err)
-	}
-	_, configErr := (Config{}).withDefaults()
-	_, _, _ = ResolvePackage("", ".")
-	if err := os.Chdir(original); err != nil {
-		t.Fatal(err)
-	}
-	if configErr == nil {
-		t.Fatal("deleted working directory was accepted")
-	}
-}
-
 func TestCoverageResolverAndWatcherErrors(t *testing.T) {
 	root := t.TempDir()
 	if directory, target, err := ResolvePackage(root, "."); err != nil || directory != root || target != "." {

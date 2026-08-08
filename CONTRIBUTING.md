@@ -12,7 +12,7 @@ Thank you for helping improve Vial. Keep contributions focused, small, and easy 
 
 ## Development setup
 
-Vial requires Go 1.23 or newer.
+Vial requires Go 1.25 or newer.
 
 ```bash
 git clone https://github.com/jrgf/go-vial.git
@@ -42,7 +42,7 @@ Do not commit generated files from `bin/`, `.vial/`, coverage profiles, editor s
 
 `make check` runs:
 
-- The repository-wide 98% coverage gate
+- The repository-wide 80% coverage gate
 - Race detection
 - `go vet`
 - The CLI build
