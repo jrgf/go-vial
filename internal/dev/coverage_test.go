@@ -20,7 +20,7 @@ type failingWriter struct{}
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 type nthFailWriter struct {
-	bytes.Buffer
+	buffer bytes.Buffer
 	mu     sync.Mutex
 	failAt int
 	calls  int
@@ -56,7 +56,7 @@ func (writer *nthFailWriter) Write(value []byte) (int, error) {
 	if writer.calls == writer.failAt {
 		return 0, errors.New("write failed")
 	}
-	return writer.Buffer.Write(value)
+	return writer.buffer.Write(value)
 }
 
 func writeTestModule(t *testing.T, source string) string {
@@ -251,7 +251,7 @@ func TestRunnerOutputWatcherDebounceAndExitBranches(t *testing.T) {
 		watcherErrors <- errors.New("watch failed")
 		changes <- Change{Path: "first.go"}
 		changes <- Change{Path: "second.go"}
-		time.Sleep(700 * time.Millisecond)
+		time.Sleep(2 * time.Second)
 		close(changes)
 		cancel()
 	}()

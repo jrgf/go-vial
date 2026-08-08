@@ -20,6 +20,65 @@ func requirePanic(t *testing.T, function func()) {
 	function()
 }
 
+func TestOperationIDAndSnapshotEdges(t *testing.T) {
+	originalGenerator, originalReader := generateOperationID, readRandom
+	t.Cleanup(func() {
+		generateOperationID = originalGenerator
+		readRandom = originalReader
+	})
+
+	want := errors.New("random failed")
+	readRandom = func([]byte) (int, error) { return 0, want }
+	if _, err := newOperationID(); !errors.Is(err, want) {
+		t.Fatalf("newOperationID() error = %v", err)
+	}
+	readRandom = originalReader
+
+	executor := NewMemoryExecutor(WithWorkers(1), WithQueueSize(2))
+	executor.Handle("test", func(context.Context, Job) (any, error) { return "ok", nil })
+	startExecutor(t, executor)
+	generateOperationID = func() (string, error) { return "", want }
+	if _, err := executor.Submit(context.Background(), vial.SubmitRequest{Name: "test"}); !errors.Is(err, want) {
+		t.Fatalf("initial ID error = %v", err)
+	}
+
+	generateOperationID = originalGenerator
+	operation, err := executor.Submit(context.Background(), vial.SubmitRequest{Name: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	generateOperationID = func() (string, error) {
+		calls++
+		if calls == 1 {
+			return operation.ID, nil
+		}
+		return "", want
+	}
+	if _, err := executor.Submit(context.Background(), vial.SubmitRequest{Name: "test"}); !errors.Is(err, want) {
+		t.Fatalf("collision ID error = %v", err)
+	}
+	if snapshot(nil) != nil {
+		t.Fatal("snapshot(nil) is not nil")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		current, getErr := executor.Get(context.Background(), operation.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if current.Status.Terminal() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("operation did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	executor.cancelUnfinished()
+}
+
 func startExecutor(t *testing.T, executor *MemoryExecutor) context.CancelFunc {
 	t.Helper()
 	contextValue, cancel := context.WithCancel(context.Background())

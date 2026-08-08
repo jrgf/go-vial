@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -37,6 +38,12 @@ func TestWebExample(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWebExampleMain(t *testing.T) {
+	t.Setenv("ADDR", "")
+	t.Setenv("VIAL_ROUTES_OUTPUT", filepath.Join(t.TempDir(), "routes.json"))
+	main()
 }
 
 func TestWebFormValidationAndCSRF(t *testing.T) {
@@ -78,5 +85,25 @@ func TestWebFormValidationAndCSRF(t *testing.T) {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestWebFormParseError(t *testing.T) {
+	app, err := newApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := httptest.NewRecorder()
+	app.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "http://example.com/", nil))
+	cookie := first.Result().Cookies()[0]
+	request := httptest.NewRequest(http.MethodPost, "http://example.com/greet", strings.NewReader("name=%ZZ"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "http://example.com")
+	request.Header.Set("X-CSRF-Token", cookie.Value)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("parse error status = %d", response.Code)
 	}
 }

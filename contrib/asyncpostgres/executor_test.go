@@ -22,6 +22,14 @@ func (result testResult) RowsAffected() (int64, error) {
 	return int64(result), nil
 }
 
+func TestRandomIDFailuresPanic(t *testing.T) {
+	original := randomRead
+	randomRead = func([]byte) (int, error) { return 0, errors.New("random failed") }
+	t.Cleanup(func() { randomRead = original })
+	requirePostgresPanic(t, func() { newOperationID() })
+	requirePostgresPanic(t, func() { newInstanceID() })
+}
+
 func TestRetryPolicyAndBackoff(t *testing.T) {
 	attempts, initial, maximum, err := normalizeRetry(vial.RetryPolicy{MaxAttempts: 4})
 	if err != nil || attempts != 4 || initial != time.Second || maximum != time.Minute {

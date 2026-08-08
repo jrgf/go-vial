@@ -5,15 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jrgf/go-vial"
 )
+
+type commandErrorWriter struct{}
+
+func (commandErrorWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 func TestSplitApplicationArguments(t *testing.T) {
 	framework, application := splitApplicationArguments([]string{
@@ -87,6 +94,110 @@ func TestRunDoctor(t *testing.T) {
 	}
 	if got := output.String(); got != "vial doctor: ok (routes: 1)\n" {
 		t.Fatalf("doctor output = %q", got)
+	}
+}
+
+func TestRunDispatchesCommands(t *testing.T) {
+	for _, arguments := range [][]string{
+		{"dev", "one", "two"},
+		{"routes", "--unknown"},
+		{"doctor", "--unknown"},
+		{"load"},
+	} {
+		if err := run(arguments); err == nil {
+			t.Fatalf("run(%q) unexpectedly succeeded", arguments)
+		}
+	}
+}
+
+func TestRunLoadProgressAndWriteErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	original := loadProgressInterval
+	loadProgressInterval = time.Millisecond
+	t.Cleanup(func() { loadProgressInterval = original })
+
+	var progress bytes.Buffer
+	if err := runLoad([]string{"--workers=1", "--duration=20ms", "--timeout=100ms", server.URL}, io.Discard, &progress); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(progress.String(), "load progress") {
+		t.Fatalf("progress = %q", progress.String())
+	}
+
+	if err := runLoad([]string{"--workers=1", "--duration=20ms", "--timeout=100ms", server.URL}, io.Discard, commandErrorWriter{}); err == nil || !strings.Contains(err.Error(), "progress") {
+		t.Fatalf("progress write error = %v", err)
+	}
+	if err := runLoad([]string{"--workers=1", "--duration=1ms", "--timeout=100ms", server.URL}, commandErrorWriter{}, io.Discard); err == nil || !strings.Contains(err.Error(), "summary") {
+		t.Fatalf("summary write error = %v", err)
+	}
+	loadProgressInterval = time.Hour
+	if err := runLoad([]string{"--workers=1", "--duration=1ms", "--timeout=100ms", server.URL}, io.Discard, commandErrorWriter{}); err == nil || !strings.Contains(err.Error(), "progress") {
+		t.Fatalf("final progress write error = %v", err)
+	}
+}
+
+func TestCommandInspectionErrors(t *testing.T) {
+	if _, err := inspectApplication("\x00", nil); err == nil {
+		t.Fatal("expected invalid target error")
+	}
+	t.Run("temporary output", func(t *testing.T) {
+		t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+		if _, err := inspectApplication("../../examples/hello", nil); err == nil || !strings.Contains(err.Error(), "create inspection output") {
+			t.Fatalf("temporary output error = %v", err)
+		}
+	})
+	if _, err := inspectApplication(filepath.Join(t.TempDir(), "missing"), nil); err == nil {
+		t.Fatal("expected package resolution error")
+	}
+	if err := runRoutes([]string{filepath.Join(t.TempDir(), "missing")}, io.Discard); err == nil {
+		t.Fatal("expected routes inspection error")
+	}
+	if err := runDoctor([]string{filepath.Join(t.TempDir(), "missing")}, io.Discard); err == nil {
+		t.Fatal("expected doctor inspection error")
+	}
+
+	for _, test := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"build", `package main; func main() { missing() }`, "inspect application"},
+		{"empty", `package main; func main() {}`, "did not call App.Run"},
+		{"invalid", `package main
+import "os"
+func main() { _ = os.WriteFile(os.Getenv("VIAL_ROUTES_OUTPUT"), []byte("invalid"), 0600) }`, "decode inspection output"},
+		{"removed", `package main
+import "os"
+func main() { _ = os.Remove(os.Getenv("VIAL_ROUTES_OUTPUT")) }`, "read inspection output"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			if err := os.WriteFile(filepath.Join(directory, "go.mod"), []byte("module inspection\n\ngo 1.23\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(directory, "main.go"), []byte(test.source), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := inspectApplication(directory, nil); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("inspection error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestCommandOutputErrors(t *testing.T) {
+	if err := runDoctor([]string{"../../examples/config"}, commandErrorWriter{}); err == nil || !strings.Contains(err.Error(), "write doctor") {
+		t.Fatalf("doctor write error = %v", err)
+	}
+	if err := writeRoutes(commandErrorWriter{}, []vial.Route{{Method: http.MethodGet, Path: "/"}}, true); err == nil {
+		t.Fatal("expected JSON route write error")
+	}
+	if err := writeRoutes(commandErrorWriter{}, []vial.Route{{Path: "/"}}, false); err == nil {
+		t.Fatal("expected table route write error")
 	}
 }
 

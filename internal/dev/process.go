@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var killProcess = killCommand
+
 // Process represents a running application child process.
 type Process struct {
 	command *exec.Cmd
@@ -73,7 +75,7 @@ func (process *Process) Stop(timeout time.Duration) error {
 	case <-timer.C:
 	}
 
-	killErr := killCommand(process.command)
+	killErr := killProcess(process.command)
 	if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
 		return fmt.Errorf("kill application process: %w", killErr)
 	}

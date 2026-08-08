@@ -10,6 +10,8 @@ import (
 	"github.com/jrgf/go-vial"
 )
 
+var heartbeatInterval = time.Minute
+
 func main() {
 	if err := newApp(heartbeat).Run(context.Background(), ":8080"); err != nil {
 		slog.Error("application stopped with an error", "error", err)
@@ -27,7 +29,7 @@ func newApp(worker vial.Task) *vial.App {
 }
 
 func heartbeat(contextValue context.Context) error {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 	for {
 		select {

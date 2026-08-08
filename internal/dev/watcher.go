@@ -12,6 +12,8 @@ import (
 
 const defaultScanInterval = 100 * time.Millisecond
 
+var walkDirectory = filepath.WalkDir
+
 // Change identifies a source path that may require a rebuild.
 type Change struct {
 	Path string
@@ -39,7 +41,7 @@ type Watcher struct {
 }
 
 func NewWatcher(root string, excludes []string) (*Watcher, error) {
-	absoluteRoot, err := filepath.Abs(root)
+	absoluteRoot, err := makeAbsolute(root)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +122,7 @@ func (watcher *Watcher) scanForChanges() {
 
 func (watcher *Watcher) scan() (map[string]fileFingerprint, error) {
 	snapshot := make(map[string]fileFingerprint)
-	err := filepath.WalkDir(watcher.root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := walkDirectory(watcher.root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if errors.Is(walkErr, os.ErrNotExist) {
 				return nil

@@ -42,7 +42,7 @@ Do not commit generated files from `bin/`, `.vial/`, coverage profiles, editor s
 
 `make check` runs:
 
-- The repository-wide 80% coverage gate
+- The repository-wide 98% coverage gate
 - Race detection
 - `go vet`
 - The CLI build

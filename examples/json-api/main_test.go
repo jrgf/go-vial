@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/http"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jrgf/go-vial/testkit"
@@ -31,4 +33,14 @@ func TestExampleNoteLifecycle(t *testing.T) {
 
 	invalidResponse := server.JSON(http.MethodPost, "/api/notes", map[string]string{"title": " "})
 	invalidResponse.RequireStatus(http.StatusBadRequest)
+
+	malformed := server.NewRequest(http.MethodPost, "/api/notes", strings.NewReader("{"))
+	malformed.Header.Set("Content-Type", "application/json")
+	server.Do(malformed).RequireStatus(http.StatusBadRequest)
+}
+
+func TestJSONAPIExampleMain(t *testing.T) {
+	t.Setenv("ADDR", "")
+	t.Setenv("VIAL_ROUTES_OUTPUT", filepath.Join(t.TempDir(), "routes.json"))
+	main()
 }

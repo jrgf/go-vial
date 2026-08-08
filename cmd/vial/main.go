@@ -20,9 +20,10 @@ import (
 )
 
 var (
-	version        = "0.16.0"
-	commit         = "development"
-	buildGoVersion string
+	version              = "0.16.0"
+	commit               = "development"
+	buildGoVersion       string
+	loadProgressInterval = time.Second
 )
 
 const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
@@ -122,7 +123,7 @@ func runLoad(arguments []string, output, progressOutput io.Writer) error {
 		finished <- err
 	}()
 
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(loadProgressInterval)
 	defer ticker.Stop()
 	progressComplete := false
 	var err error

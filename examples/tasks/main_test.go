@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jrgf/go-vial/testkit"
 )
@@ -33,5 +36,29 @@ func TestTaskLifecycle(t *testing.T) {
 	case <-stopped:
 	default:
 		t.Fatal("task did not stop before the application")
+	}
+}
+
+func TestTasksExampleMain(t *testing.T) {
+	t.Setenv("VIAL_ROUTES_OUTPUT", filepath.Join(t.TempDir(), "routes.json"))
+	main()
+}
+
+func TestHeartbeatStopsWithContext(t *testing.T) {
+	contextValue, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := heartbeat(contextValue); !errors.Is(err, context.Canceled) {
+		t.Fatalf("heartbeat error = %v", err)
+	}
+}
+
+func TestHeartbeatTick(t *testing.T) {
+	original := heartbeatInterval
+	heartbeatInterval = time.Millisecond
+	t.Cleanup(func() { heartbeatInterval = original })
+	contextValue, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	if err := heartbeat(contextValue); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("heartbeat error = %v", err)
 	}
 }

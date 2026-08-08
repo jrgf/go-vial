@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -34,8 +35,18 @@ func TestConfigApplication(t *testing.T) {
 	}
 }
 
+func TestConfigExampleMain(t *testing.T) {
+	t.Setenv("VIAL_ENV", "test")
+	t.Setenv("VIAL_HTTP_PORT", "0")
+	t.Setenv("VIAL_ROUTES_OUTPUT", filepath.Join(t.TempDir(), "routes.json"))
+	main()
+}
+
 func TestConfigValidation(t *testing.T) {
 	if err := (&applicationConfig{}).Validate(); err == nil {
 		t.Fatal("expected validation error")
+	}
+	if err := (&applicationConfig{Environment: "test"}).Validate(); err != nil {
+		t.Fatalf("valid configuration: %v", err)
 	}
 }

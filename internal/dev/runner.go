@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var newSourceWatcher = NewWatcher
+
 // Runner owns source watching, sequential builds, and child-process replacement.
 type Runner struct {
 	config        Config
@@ -23,7 +25,7 @@ func NewRunner(config Config) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	watcher, err := NewWatcher(normalized.Root, normalized.Excludes)
+	watcher, err := newSourceWatcher(normalized.Root, normalized.Excludes)
 	if err != nil {
 		return nil, fmt.Errorf("create source watcher: %w", err)
 	}

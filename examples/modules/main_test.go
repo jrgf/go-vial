@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -49,4 +50,15 @@ func TestModuleExample(t *testing.T) {
 	if missing.Code != http.StatusNotFound || !strings.Contains(missing.Body.String(), `"code":"greeting_not_found"`) {
 		t.Fatalf("unexpected fault response: status=%d body=%s", missing.Code, missing.Body.String())
 	}
+
+	greeting := httptest.NewRecorder()
+	app.ServeHTTP(greeting, httptest.NewRequest(http.MethodGet, "/greetings/Ada", nil))
+	if greeting.Code != http.StatusOK || greeting.Body.String() != "Hello, Ada" {
+		t.Fatalf("unexpected greeting: status=%d body=%q", greeting.Code, greeting.Body.String())
+	}
+}
+
+func TestModulesExampleMain(t *testing.T) {
+	t.Setenv("VIAL_ROUTES_OUTPUT", filepath.Join(t.TempDir(), "routes.json"))
+	main()
 }

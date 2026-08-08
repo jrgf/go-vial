@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,6 +36,12 @@ func TestExampleRoutes(t *testing.T) {
 	}
 }
 
+func TestHelloExampleMain(t *testing.T) {
+	t.Setenv("ADDR", "")
+	t.Setenv("VIAL_ROUTES_OUTPUT", filepath.Join(t.TempDir(), "routes.json"))
+	main()
+}
+
 func TestExampleUnknownRoute(t *testing.T) {
 	response := httptest.NewRecorder()
 	testApp(t).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/missing", nil))
@@ -51,6 +58,14 @@ func TestExampleMethodNotAllowed(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"code":"method_not_allowed"`) {
 		t.Fatalf("unexpected method response body: %s", response.Body.String())
+	}
+}
+
+func TestExampleSubmit(t *testing.T) {
+	response := httptest.NewRecorder()
+	testApp(t).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/submit", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("submit status = %d", response.Code)
 	}
 }
 

@@ -3,6 +3,8 @@ package load
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,10 @@ import (
 	"testing"
 	"time"
 )
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 func TestRun(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
@@ -124,5 +130,40 @@ func TestValidation(t *testing.T) {
 		if err := Check(Result{}, thresholds); err == nil {
 			t.Fatalf("expected threshold error for %#v", thresholds)
 		}
+	}
+}
+
+func TestCoverageEdgeCases(t *testing.T) {
+	contextValue, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := Run(contextValue, Config{
+		URL: "http://example.com", Workers: 2, Duration: 100 * time.Millisecond, Timeout: time.Second,
+	})
+	if !errors.Is(err, context.Canceled) || result.Requests != 0 {
+		t.Fatalf("cancelled run = %#v, %v", result, err)
+	}
+
+	empty := Result{}
+	if empty.ErrorRate() != 0 || empty.Throughput() != 0 {
+		t.Fatalf("empty rates = %f/%f", empty.ErrorRate(), empty.Throughput())
+	}
+	if err := WriteSummary(io.Discard, empty); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSummary(failingWriter{}, empty); err == nil {
+		t.Fatal("expected summary write error")
+	}
+
+	measurements := newMetrics(20*time.Second + time.Nanosecond)
+	measureRequest(context.Background(), http.DefaultClient, "://", measurements)
+	measurements.record(1001, false, time.Hour)
+	if got := measurements.result(time.Second); got.Requests != 2 || got.Errors != 1 {
+		t.Fatalf("metrics result = %#v", got)
+	}
+	if got := newMetrics(time.Nanosecond); got.bucketWidth != time.Microsecond {
+		t.Fatalf("minimum bucket width = %s", got.bucketWidth)
+	}
+	if got := newMetrics(time.Second).quantile(1, 50); got <= time.Second {
+		t.Fatalf("empty quantile = %s", got)
 	}
 }

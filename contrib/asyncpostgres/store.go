@@ -15,6 +15,8 @@ import (
 	"github.com/jrgf/go-vial"
 )
 
+var randomRead = rand.Read
+
 //go:embed schema.sql
 var schemaSQL string
 
@@ -569,7 +571,7 @@ func cloneMetadata(metadata map[string]string) map[string]string {
 
 func newOperationID() string {
 	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
+	if _, err := randomRead(random[:]); err != nil {
 		panic("asyncpostgres: crypto/rand failed: " + err.Error())
 	}
 	return "op_" + hex.EncodeToString(random[:])
@@ -577,7 +579,7 @@ func newOperationID() string {
 
 func newInstanceID() string {
 	var random [12]byte
-	if _, err := rand.Read(random[:]); err != nil {
+	if _, err := randomRead(random[:]); err != nil {
 		panic("asyncpostgres: crypto/rand failed: " + err.Error())
 	}
 	return hex.EncodeToString(random[:])

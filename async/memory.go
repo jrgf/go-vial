@@ -21,6 +21,11 @@ const (
 	defaultTaskTimeout = 5 * time.Minute
 )
 
+var (
+	generateOperationID = newOperationID
+	readRandom          = rand.Read
+)
+
 // Handler processes one decoded operation payload.
 type Handler = vial.AsyncHandler
 
@@ -297,7 +302,7 @@ func (executor *MemoryExecutor) Submit(contextValue context.Context, request via
 	if err != nil {
 		return nil, fmt.Errorf("%w: encode payload: %v", vial.ErrInvalidOperation, err)
 	}
-	id, err := newOperationID()
+	id, err := generateOperationID()
 	if err != nil {
 		return nil, fmt.Errorf("create operation ID: %w", err)
 	}
@@ -318,7 +323,7 @@ func (executor *MemoryExecutor) Submit(contextValue context.Context, request via
 		}
 	}
 	for executor.operations[id] != nil {
-		id, err = newOperationID()
+		id, err = generateOperationID()
 		if err != nil {
 			return nil, fmt.Errorf("create operation ID: %w", err)
 		}
@@ -690,7 +695,7 @@ func cloneTime(value *time.Time) *time.Time {
 
 func newOperationID() (string, error) {
 	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
+	if _, err := readRandom(random[:]); err != nil {
 		return "", err
 	}
 	return "op_" + hex.EncodeToString(random[:]), nil

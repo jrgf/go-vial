@@ -26,6 +26,8 @@ const (
 	csrfMaxAge        = 12 * time.Hour
 )
 
+var randomRead = rand.Read
+
 var csrfContextKey = vial.NewValueKey[string]("csrf_token")
 
 // CSRFConfig defines the signing key and accepted browser origins.
@@ -140,7 +142,7 @@ func (policy csrfPolicy) issueToken(context *vial.Context) (string, error) {
 	}
 
 	randomValue := make([]byte, csrfTokenBytes)
-	if _, err := rand.Read(randomValue); err != nil {
+	if _, err := randomRead(randomValue); err != nil {
 		return "", fmt.Errorf("generate csrf token: %w", err)
 	}
 	token := policy.sign(randomValue)

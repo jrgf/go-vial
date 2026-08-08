@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -51,7 +50,7 @@ func RequestIDFromRequest(request *http.Request) string {
 
 func newRequestID() string {
 	var random [16]byte
-	if _, err := rand.Read(random[:]); err == nil {
+	if _, err := randomRead(random[:]); err == nil {
 		return hex.EncodeToString(random[:])
 	}
 

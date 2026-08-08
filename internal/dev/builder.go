@@ -12,6 +12,13 @@ import (
 	"time"
 )
 
+var (
+	getWorkingDirectory = os.Getwd
+	makeAbsolute        = filepath.Abs
+	makeRelative        = filepath.Rel
+	fileStat            = os.Stat
+)
+
 // Builder compiles successive candidate executables to unique paths.
 type Builder struct {
 	config   Config
@@ -76,13 +83,13 @@ func (builder *Builder) Build(contextValue context.Context) (string, error) {
 // Import paths and missing targets are left for the Go command to resolve.
 func ResolvePackage(root, target string) (string, string, error) {
 	if root == "" {
-		workingDirectory, err := os.Getwd()
+		workingDirectory, err := getWorkingDirectory()
 		if err != nil {
 			return "", "", fmt.Errorf("resolve working directory: %w", err)
 		}
 		root = workingDirectory
 	}
-	absoluteRoot, err := filepath.Abs(root)
+	absoluteRoot, err := makeAbsolute(root)
 	if err != nil {
 		return "", "", fmt.Errorf("resolve package root: %w", err)
 	}
@@ -94,7 +101,7 @@ func ResolvePackage(root, target string) (string, string, error) {
 		candidate = filepath.Join(absoluteRoot, candidate)
 	}
 	candidate = filepath.Clean(candidate)
-	info, err := os.Stat(candidate)
+	info, err := fileStat(candidate)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return absoluteRoot, target, nil
@@ -106,9 +113,9 @@ func ResolvePackage(root, target string) (string, string, error) {
 	}
 
 	for directory := candidate; ; directory = filepath.Dir(directory) {
-		module, statErr := os.Stat(filepath.Join(directory, "go.mod"))
+		module, statErr := fileStat(filepath.Join(directory, "go.mod"))
 		if statErr == nil && !module.IsDir() {
-			relative, relErr := filepath.Rel(directory, candidate)
+			relative, relErr := makeRelative(directory, candidate)
 			if relErr != nil {
 				return "", "", fmt.Errorf("resolve package within module: %w", relErr)
 			}

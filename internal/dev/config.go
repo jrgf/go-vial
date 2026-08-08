@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -30,17 +29,17 @@ type Config struct {
 
 func (config Config) withDefaults() (Config, error) {
 	if config.Root == "" {
-		workingDirectory, err := os.Getwd()
+		workingDirectory, err := getWorkingDirectory()
 		if err != nil {
 			return Config{}, err
 		}
 		config.Root = workingDirectory
 	}
-	absoluteRoot, err := filepath.Abs(config.Root)
+	absoluteRoot, err := makeAbsolute(config.Root)
 	if err != nil {
 		return Config{}, fmt.Errorf("resolve project root: %w", err)
 	}
-	info, err := os.Stat(absoluteRoot)
+	info, err := fileStat(absoluteRoot)
 	if err != nil {
 		return Config{}, fmt.Errorf("inspect project root: %w", err)
 	}
