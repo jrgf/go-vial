@@ -49,6 +49,17 @@ func (buffer *lockedBuffer) Reset() {
 	buffer.mu.Unlock()
 }
 
+func (buffer *lockedBuffer) waitFor(text string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Contains(buffer.String(), text) {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return strings.Contains(buffer.String(), text)
+}
+
 func (writer *nthFailWriter) Write(value []byte) (int, error) {
 	writer.mu.Lock()
 	defer writer.mu.Unlock()
@@ -251,13 +262,18 @@ func TestRunnerOutputWatcherDebounceAndExitBranches(t *testing.T) {
 	runner, changes, watcherErrors := manualRunner(t, "package main\nimport \"time\"\nfunc main(){ time.Sleep(150*time.Millisecond) }\n", &output, &output)
 	contextValue, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		defer cancel()
+		defer close(changes)
+		if !output.waitFor("application started", 10*time.Second) {
+			return
+		}
 		watcherErrors <- errors.New("watch failed")
 		changes <- Change{Path: "first.go"}
 		changes <- Change{Path: "second.go"}
-		time.Sleep(2 * time.Second)
-		close(changes)
-		cancel()
+		if !output.waitFor("source change detected", 10*time.Second) {
+			return
+		}
+		output.waitFor("application exited", 10*time.Second)
 	}()
 	if err := runner.Run(contextValue); err != nil {
 		t.Fatalf("run controlled events: %v", err)
@@ -269,7 +285,7 @@ func TestRunnerOutputWatcherDebounceAndExitBranches(t *testing.T) {
 	output.Reset()
 	runner, changes, _ = manualRunner(t, "package main\nimport \"os\"\nfunc main(){ os.Exit(2) }\n", &output, &output)
 	go func() {
-		time.Sleep(500 * time.Millisecond)
+		output.waitFor("application exited:", 10*time.Second)
 		close(changes)
 	}()
 	if err := runner.Run(context.Background()); err != nil {
@@ -331,11 +347,14 @@ func TestRunnerEventWriteAndReplacementFailures(t *testing.T) {
 		t.Fatal("failed process exit write failure was ignored")
 	}
 
-	runner, changes, _ = manualRunner(t, longRunning, io.Discard, failingWriter{})
-	contextValue, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	var rebuildOutput lockedBuffer
+	runner, changes, _ = manualRunner(t, longRunning, &rebuildOutput, failingWriter{})
+	contextValue, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	go func() {
-		time.Sleep(300 * time.Millisecond)
+		if !rebuildOutput.waitFor("application started", 10*time.Second) {
+			return
+		}
 		_ = os.WriteFile(filepath.Join(runner.config.Root, "main.go"), []byte("package main\nfunc main( {\n"), 0o644)
 		changes <- Change{Path: "main.go"}
 	}()
