@@ -142,7 +142,11 @@ func TestWatcherEdgeBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new watcher: %v", err)
 	}
-	defer watcher.Close()
+	defer func() {
+		if closeErr := watcher.Close(); closeErr != nil {
+			t.Errorf("close watcher: %v", closeErr)
+		}
+	}()
 	watcher.reportChange("first")
 	for range cap(watcher.changes) {
 		watcher.reportChange("full")

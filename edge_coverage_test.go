@@ -72,13 +72,18 @@ func TestCoverageServerErrors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer listener.Close()
+		defer func() {
+			if closeErr := listener.Close(); closeErr != nil {
+				t.Errorf("close listener: %v", closeErr)
+			}
+		}()
 		if err := New().Run(context.Background(), listener.Addr().String()); err == nil || !strings.Contains(err.Error(), "listen") {
 			t.Fatalf("listen error = %v", err)
 		}
 	})
 	t.Run("serve context and close", func(t *testing.T) {
 		want := errors.New("close failed")
+		//nolint:staticcheck // Exercise Serve's supported nil-context fallback.
 		err := New().Serve(nil, coverageListener{closeErr: want})
 		if !errors.Is(err, want) {
 			t.Fatalf("Serve() error = %v", err)

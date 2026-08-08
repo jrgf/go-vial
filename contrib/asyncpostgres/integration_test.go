@@ -472,13 +472,16 @@ func TestDurableLifecycleRestartWorkersAndIdempotency(t *testing.T) {
 		<-releaseLate
 		return "late", nil
 	})
+	//nolint:staticcheck // Exercise Start's supported nil-context fallback.
 	if err := executor.Start(nil); err != nil {
 		t.Fatalf("start executor: %v", err)
 	}
+	//nolint:staticcheck // Exercise Ready's supported nil-context fallback.
 	if err := executor.Ready(nil); err != nil {
 		t.Fatalf("ready executor: %v", err)
 	}
 
+	//nolint:staticcheck // Exercise Submit's supported nil-context fallback.
 	operation, err := executor.Submit(nil, vial.SubmitRequest{
 		Name: "success", Payload: map[string]string{"report": "sales"},
 		IdempotencyKey: "report-1", IdempotencyScope: "tenant-1", Metadata: map[string]string{"tenant_id": "tenant-1"},
@@ -494,6 +497,7 @@ func TestDurableLifecycleRestartWorkersAndIdempotency(t *testing.T) {
 	if completed.Progress != 100 {
 		t.Fatalf("completed operation = %#v", completed)
 	}
+	//nolint:staticcheck // Exercise Wait's supported nil-context fallback.
 	if waited, err := executor.Wait(nil, operation.ID); err != nil || waited.Status != vial.OperationSucceeded {
 		t.Fatalf("wait = %#v, %v", waited, err)
 	}
@@ -540,11 +544,13 @@ func TestDurableLifecycleRestartWorkersAndIdempotency(t *testing.T) {
 	}
 	close(releaseLate)
 	waitForOperation(t, executor, late.ID, vial.OperationCancelled)
+	//nolint:staticcheck // Exercise Metrics' supported nil-context fallback.
 	metrics, err := executor.Metrics(nil)
 	if err != nil || metrics.SubmittedTotal != 9 || metrics.CompletedTotal != 4 || metrics.FailedTotal != 4 || metrics.CancelledTotal != 1 || metrics.RetriedTotal == 0 {
 		t.Fatalf("metrics = %#v, %v", metrics, err)
 	}
 
+	//nolint:staticcheck // Exercise Shutdown's supported nil-context fallback.
 	if err := executor.Shutdown(nil); err != nil {
 		t.Fatalf("shutdown executor: %v", err)
 	}
@@ -560,6 +566,7 @@ func TestDurableLifecycleRestartWorkersAndIdempotency(t *testing.T) {
 	if err := restarted.Start(context.Background()); err != nil {
 		t.Fatalf("restart executor: %v", err)
 	}
+	//nolint:staticcheck // Exercise Get's supported nil-context fallback.
 	if persisted, err := restarted.Get(nil, operation.ID); err != nil || persisted.Status != vial.OperationSucceeded {
 		t.Fatalf("persisted operation = %#v, %v", persisted, err)
 	}
@@ -639,6 +646,7 @@ func TestDurableCancellationFailuresAndValidation(t *testing.T) {
 		t.Fatalf("submit block: %v", err)
 	}
 	<-started
+	//nolint:staticcheck // Exercise Cancel's supported nil-context fallback.
 	if err := executor.Cancel(nil, operation.ID); err != nil {
 		t.Fatalf("cancel operation: %v", err)
 	}
@@ -811,6 +819,7 @@ func TestDurableExecutorAndStoreEdgeBranches(t *testing.T) {
 
 	owned := leasedOperation{operation: vial.Operation{ID: "owned", Status: vial.OperationRunning, Attempt: 1}}
 	store.operations["owned"] = &testOperation{id: "owned", status: "running", leaseOwner: "owner", attempt: 1, createdAt: now}
+	//nolint:staticcheck // Exercise progress reporting's supported nil-context fallback.
 	if err := submitter.progress(nil, owned, "owner", 10); err != nil {
 		t.Fatalf("progress with background context: %v", err)
 	}
@@ -844,6 +853,7 @@ func TestDurableExecutorAndStoreEdgeBranches(t *testing.T) {
 func TestStoreAndScannerErrorPaths(t *testing.T) {
 	database, store := newTestDatabase(t)
 	executor := New(database)
+	//nolint:staticcheck // Exercise EnsureSchema's supported nil-context fallback.
 	if err := executor.EnsureSchema(nil); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
@@ -886,6 +896,7 @@ func TestStoreAndScannerErrorPaths(t *testing.T) {
 	}
 
 	delivery := leasedOperation{operation: vial.Operation{ID: "missing", Attempt: 1}}
+	//nolint:staticcheck // Exercise progress validation before context use.
 	if err := executor.progress(nil, delivery, "owner", -1); !errors.Is(err, vial.ErrInvalidOperation) {
 		t.Fatalf("invalid progress = %v", err)
 	}

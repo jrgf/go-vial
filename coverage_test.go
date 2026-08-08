@@ -176,6 +176,8 @@ func TestBindingRemainingBranches(t *testing.T) {
 		Decimal  float64 `query:"decimal"`
 		hidden   string  `query:"hidden"`
 	}
+	var hiddenField tagged
+	_ = hiddenField.hidden
 	for _, rawQuery := range []string{
 		"number=bad",
 		"pointer=7",
@@ -256,6 +258,7 @@ func (*coverageLifecycleComponent) Shutdown(context.Context) error        { retu
 func TestLifecycleAndModuleRaceEdges(t *testing.T) {
 	finished := &coverageLifecycleComponent{done: make(chan error, 1)}
 	finished.done <- nil
+	//nolint:staticcheck // Exercise the lifecycle's supported nil-parent fallback.
 	if err := New().runLifecycle(nil, nil, finished); err != nil {
 		t.Fatalf("nil-parent lifecycle = %v", err)
 	}

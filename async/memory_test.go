@@ -340,6 +340,7 @@ func TestMemoryExecutorValidationAndLifecycleEdges(t *testing.T) {
 	if err := executor.Shutdown(context.Background()); !errors.Is(err, vial.ErrAsyncUnavailable) {
 		t.Fatalf("shutdown before start = %v", err)
 	}
+	//nolint:staticcheck // Exercise Start's supported nil-context fallback.
 	if err := executor.Start(nil); err != nil {
 		t.Fatalf("start executor: %v", err)
 	}
@@ -386,6 +387,7 @@ func TestMemoryExecutorValidationAndLifecycleEdges(t *testing.T) {
 	if err := executor.Ready(cancelled); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled ready = %v", err)
 	}
+	//nolint:staticcheck // Exercise Ready's supported nil-context fallback.
 	if err := executor.Ready(nil); err != nil {
 		t.Fatalf("ready executor: %v", err)
 	}
@@ -394,6 +396,7 @@ func TestMemoryExecutorValidationAndLifecycleEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit valid operation: %v", err)
 	}
+	//nolint:staticcheck // Exercise Wait's supported nil-context fallback.
 	completed, err := executor.Wait(nil, operation.ID)
 	if err != nil || completed.Status != vial.OperationSucceeded {
 		t.Fatalf("wait = %#v, %v", completed, err)
@@ -404,9 +407,11 @@ func TestMemoryExecutorValidationAndLifecycleEdges(t *testing.T) {
 	if err := executor.Cancel(context.Background(), operation.ID); err != nil {
 		t.Fatalf("cancel completed operation: %v", err)
 	}
+	//nolint:staticcheck // Exercise Metrics' supported nil-context fallback.
 	if _, err := executor.Metrics(nil); err != nil {
 		t.Fatalf("metrics: %v", err)
 	}
+	//nolint:staticcheck // Exercise Shutdown's supported nil-context fallback.
 	if err := executor.Shutdown(nil); err != nil {
 		t.Fatalf("shutdown executor: %v", err)
 	}
