@@ -145,7 +145,10 @@ func TestCommandInspectionErrors(t *testing.T) {
 		t.Fatal("expected invalid target error")
 	}
 	t.Run("temporary output", func(t *testing.T) {
-		t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+		temporaryDirectory := filepath.Join(t.TempDir(), "missing")
+		for _, environment := range []string{"TMPDIR", "TMP", "TEMP"} {
+			t.Setenv(environment, temporaryDirectory)
+		}
 		if _, err := inspectApplication("../../examples/hello", nil); err == nil || !strings.Contains(err.Error(), "create inspection output") {
 			t.Fatalf("temporary output error = %v", err)
 		}
