@@ -43,6 +43,9 @@ Its runtime has no dependencies outside the standard library.
 3. **Async operations:** [`examples/async`](examples/async) demonstrates
    submission, `Prefer: wait`, polling, cancellation, ownership, idempotency,
    readiness, and metrics with the bounded in-memory executor.
+4. **Complete applications:** [vial-gateway](https://github.com/jrgf/vial-gateway)
+   and [vialboard](https://github.com/jrgf/vialboard) demonstrate complete usage
+   of go-vial.
 
 ## Project status
 
