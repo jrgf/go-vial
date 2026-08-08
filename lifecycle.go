@@ -58,6 +58,7 @@ func (app *App) runLifecycle(parent context.Context, components ...lifecycleComp
 	startHooks := append([]LifecycleHook(nil), app.startHooks...)
 	stopHooks := append([]LifecycleHook(nil), app.stopHooks...)
 	tasks := append([]taskDefinition(nil), app.tasks...)
+	asyncExecutor := app.asyncExecutor
 	logger := app.config.logger
 	app.mu.Unlock()
 	if len(tasks) > 0 {
@@ -65,6 +66,9 @@ func (app *App) runLifecycle(parent context.Context, components ...lifecycleComp
 			[]lifecycleComponent{newTaskSupervisor(tasks, logger)},
 			components...,
 		)
+	}
+	if component, ok := asyncExecutor.(AsyncLifecycleExecutor); ok {
+		components = append([]lifecycleComponent{component}, components...)
 	}
 
 	runContext, cancelRun := context.WithCancel(parent)

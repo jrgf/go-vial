@@ -129,6 +129,9 @@ func StatusCode(err error) int {
 }
 
 func applyHTTPErrorHeaders(context *Context, err error) {
+	if errors.Is(err, ErrAsyncQueueFull) || errors.Is(err, ErrAsyncUnavailable) {
+		context.response.Header().Set("Retry-After", "5")
+	}
 	var httpErr *HTTPError
 	if !errors.As(err, &httpErr) || httpErr == nil {
 		return
@@ -190,6 +193,35 @@ func mapHTTPError(err error) mappedHTTPError {
 			mapped.message = httpErr.Message
 		}
 		return mapped
+	}
+	var operationErr *OperationError
+	if errors.As(err, &operationErr) && operationErr != nil {
+		mapped.code = operationErr.Code
+		mapped.message = operationErr.Message
+		if mapped.code == "" {
+			mapped.code = "operation_failed"
+		}
+		if mapped.message == "" {
+			mapped.message = "The operation could not be completed"
+		}
+		return mapped
+	}
+
+	switch {
+	case errors.Is(err, ErrAsyncQueueFull):
+		return mappedHTTPError{status: http.StatusServiceUnavailable, code: "async_queue_full", message: "The operation could not be accepted at this time"}
+	case errors.Is(err, ErrAsyncUnavailable):
+		return mappedHTTPError{status: http.StatusServiceUnavailable, code: "async_unavailable", message: "Asynchronous operations are unavailable"}
+	case errors.Is(err, ErrInvalidOperation):
+		return mappedHTTPError{status: http.StatusBadRequest, code: "invalid_async_operation", message: "The asynchronous operation is invalid"}
+	case errors.Is(err, ErrOperationNotFound):
+		return mappedHTTPError{status: http.StatusNotFound, code: "operation_not_found", message: "The operation was not found"}
+	case errors.Is(err, ErrOperationFinished):
+		return mappedHTTPError{status: http.StatusConflict, code: "operation_finished", message: "The operation is already finished"}
+	case errors.Is(err, ErrRetriesUnsupported):
+		return mappedHTTPError{status: http.StatusBadRequest, code: "async_retries_unsupported", message: "The executor does not support durable retries"}
+	case errors.Is(err, ErrInvalidPreference):
+		return mappedHTTPError{status: http.StatusBadRequest, code: "invalid_prefer", message: "The Prefer header is invalid"}
 	}
 
 	var faultErr *fault.Error

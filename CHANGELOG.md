@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.16.0
+
+- Add lifecycle-managed asynchronous HTTP operations with RFC 7240 wait support,
+  authorized polling and cancellation, idempotency, progress, and OpenMetrics.
+- Add bounded non-durable memory execution and durable PostgreSQL execution with
+  renewable leases, multi-replica recovery, and capped exponential retries.
 
 ## 0.15.0
 

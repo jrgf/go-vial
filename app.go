@@ -46,17 +46,18 @@ func (writer *routeMissWriter) Write(body []byte) (int, error) {
 type App struct {
 	mu sync.RWMutex
 
-	config       config
-	routes       []routeDefinition
-	modules      []string
-	middleware   []Middleware
-	errorHandler ErrorHandler
-	state        applicationState
-	buildErr     error
-	compiledRoot Handler
-	startHooks   []LifecycleHook
-	stopHooks    []LifecycleHook
-	tasks        []taskDefinition
+	config        config
+	routes        []routeDefinition
+	modules       []string
+	middleware    []Middleware
+	errorHandler  ErrorHandler
+	state         applicationState
+	buildErr      error
+	compiledRoot  Handler
+	startHooks    []LifecycleHook
+	stopHooks     []LifecycleHook
+	tasks         []taskDefinition
+	asyncExecutor AsyncExecutor
 }
 
 // New creates an application with the supplied options.

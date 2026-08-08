@@ -20,6 +20,7 @@ Its runtime has no dependencies outside the standard library.
 - Named application modules with isolated route registrars
 - Collision-safe typed context values and trusted-proxy client IPs
 - Supervised startup, shutdown, background tasks, liveness, and readiness
+- RFC 7240 asynchronous operations with polling and cancellation
 - JSON, text, redirects, and empty responses
 - Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
@@ -39,6 +40,9 @@ Its runtime has no dependencies outside the standard library.
 2. **API application:** [`examples/json-api`](examples/json-api) demonstrates
    JSON binding and errors; the focused module, task, upload, event-stream,
    config, secure-cookie, CSRF, and template examples add one concern at a time.
+3. **Async operations:** [`examples/async`](examples/async) demonstrates
+   submission, `Prefer: wait`, polling, cancellation, ownership, idempotency,
+   readiness, and metrics with the bounded in-memory executor.
 
 ## Project status
 
@@ -239,6 +243,117 @@ response.Decode(&created)
 ```
 
 Raw `net/http` requests and `httptest` remain supported.
+
+## Async operations
+
+Register a bounded executor once; Vial starts it before serving HTTP and drains
+accepted work during graceful shutdown:
+
+```go
+executor := async.NewMemoryExecutor(
+    async.WithWorkers(8),
+    async.WithQueueSize(256),
+    async.WithTaskTimeout(5*time.Minute),
+)
+executor.Handle("reports.generate", func(ctx context.Context, job async.Job) (any, error) {
+    var request GenerateReportRequest
+    if err := job.Decode(&request); err != nil {
+        return nil, err
+    }
+    return reportService.Generate(ctx, request)
+})
+app.Async(executor)
+
+app.Post("/reports", func(c *vial.Context) error {
+    preference, err := vial.ParsePrefer(c.Header("Prefer"))
+    if err != nil {
+        return err
+    }
+    if !preference.RespondAsync {
+        return vial.BadRequest("respond_async_required", "Use Prefer: respond-async")
+    }
+    operation, err := c.Async().Submit(c.Request().Context(), vial.SubmitRequest{
+        Name:             "reports.generate",
+        Payload:          GenerateReportRequest{ReportID: "report_123"},
+        IdempotencyKey:   c.Header("Idempotency-Key"),
+        IdempotencyScope: currentUserID(c),
+        Metadata:         map[string]string{"user_id": currentUserID(c)},
+    })
+    if err != nil {
+        return err
+    }
+
+    operation, completed, err := c.Await(operation, 3*time.Second)
+    if err != nil {
+        return err
+    }
+    if completed {
+        if operation.Error != nil {
+            return operation.Error
+        }
+        if operation.Status == vial.OperationCancelled {
+            return vial.Conflict("operation_cancelled", "The operation was cancelled")
+        }
+        return c.JSON(http.StatusCreated, operation.Result)
+    }
+    return c.Accepted(operation)
+})
+
+authorize := func(c *vial.Context, operation *vial.Operation) error {
+    if operation.Metadata["user_id"] != currentUserID(c) {
+        return vial.NotFound("operation_not_found", "Operation not found")
+    }
+    return nil
+}
+app.Get("/operations/{id}", vial.OperationStatusHandler(executor, authorize))
+app.Delete("/operations/{id}", vial.OperationCancelHandler(executor, authorize))
+app.Get("/metrics/async", vial.AsyncMetricsHandler(executor))
+app.Readiness("/ready", executor.Ready)
+```
+
+`Accepted` returns `202 Accepted` with `Location`, `Retry-After`, and a status
+URL. A full queue returns `503 Service Unavailable`; the same operation name,
+authenticated-owner scope, and idempotency key returns the existing operation.
+`Prefer: respond-async, wait=3` waits up to the smaller client preference and
+server maximum before falling back to `202`. Return resource URLs instead of
+embedding large results.
+
+> **The memory executor is not durable.** Every pending, running, completed,
+> and idempotency record is lost when the process exits. Use it only when losing
+> work is acceptable.
+
+For durable work, use the PostgreSQL adapter with any `database/sql` PostgreSQL
+driver already selected by the application:
+
+```go
+executor := asyncpostgres.New(db,
+    asyncpostgres.WithWorkers(16),
+    asyncpostgres.WithLeaseDuration(30*time.Second),
+)
+executor.Handle("reports.generate", generateReport)
+app.Async(executor)
+
+operation, err := executor.Submit(ctx, vial.SubmitRequest{
+    Name:             "reports.generate",
+    Payload:          request,
+    IdempotencyKey:   idempotencyKey,
+    IdempotencyScope: authenticatedUserID,
+    Retry: vial.RetryPolicy{
+        MaxAttempts:    5,
+        InitialBackoff: time.Second,
+        MaxBackoff:     time.Minute,
+    },
+})
+```
+
+The adapter creates its schema idempotently by default. It persists operations
+and results, leases rows with `FOR UPDATE SKIP LOCKED`, renews visibility while
+handlers run, recovers expired leases after crashes, supports multiple replicas,
+and leaves exhausted deliveries as inspectable `failed` operations. Disable
+automatic schema creation with `asyncpostgres.WithAutoMigrate(false)` after
+applying [`contrib/asyncpostgres/schema.sql`](contrib/asyncpostgres/schema.sql)
+through the application's migration system.
+
 
 ## Background tasks
 
