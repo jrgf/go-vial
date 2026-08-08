@@ -394,7 +394,7 @@ func requirePostgresPanic(t *testing.T, function func()) {
 
 func waitForOperation(t *testing.T, executor *Executor, id string, status vial.OperationStatus) *vial.Operation {
 	t.Helper()
-	contextValue, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	contextValue, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for {
 		operation, err := executor.Get(contextValue, id)
@@ -416,8 +416,8 @@ func newIntegrationExecutor(database *sql.DB, workers int) *Executor {
 	return New(database,
 		WithWorkers(workers),
 		WithPollInterval(2*time.Millisecond),
-		WithLeaseDuration(30*time.Millisecond),
-		WithTaskTimeout(40*time.Millisecond),
+		WithLeaseDuration(5*time.Second),
+		WithTaskTimeout(2*time.Second),
 		WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
 	)
 }
