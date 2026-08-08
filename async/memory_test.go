@@ -3,11 +3,22 @@ package async
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/jrgf/go-vial"
 )
+
+func requirePanic(t *testing.T, function func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+	function()
+}
 
 func startExecutor(t *testing.T, executor *MemoryExecutor) context.CancelFunc {
 	t.Helper()
@@ -251,4 +262,195 @@ func TestMemoryExecutorTimeoutAndPanicAreSafe(t *testing.T) {
 	if panicked.Error == nil || panicked.Error.Code != "operation_failed" || panicked.Error.Message == "internal detail" {
 		t.Fatalf("panic error = %#v", panicked.Error)
 	}
+}
+
+func TestMemoryExecutorValidationAndLifecycleEdges(t *testing.T) {
+	requirePanic(t, func() { NewMemoryExecutor(WithWorkers(0)) })
+	requirePanic(t, func() { NewMemoryExecutor(WithQueueSize(0)) })
+	requirePanic(t, func() { NewMemoryExecutor(WithTaskTimeout(0)) })
+	requirePanic(t, func() { NewMemoryExecutor(WithLogger(nil)) })
+	requirePanic(t, func() { NewMemoryExecutor(nil) })
+
+	executor := NewMemoryExecutor(WithLogger(slog.Default()))
+	requirePanic(t, func() { executor.Handle("", nil) })
+	executor.Handle("ok", func(context.Context, Job) (any, error) { return "ok", nil })
+	requirePanic(t, func() { executor.Handle("ok", func(context.Context, Job) (any, error) { return nil, nil }) })
+	if err := executor.Ready(context.Background()); !errors.Is(err, vial.ErrAsyncUnavailable) {
+		t.Fatalf("ready before start = %v", err)
+	}
+	if err := executor.Shutdown(context.Background()); !errors.Is(err, vial.ErrAsyncUnavailable) {
+		t.Fatalf("shutdown before start = %v", err)
+	}
+	if err := executor.Start(nil); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.Start(context.Background()); !errors.Is(err, vial.ErrAsyncUnavailable) {
+		t.Fatalf("second start = %v", err)
+	}
+	requirePanic(t, func() { executor.Handle("late", func(context.Context, Job) (any, error) { return nil, nil }) })
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := executor.Submit(cancelled, vial.SubmitRequest{Name: "ok"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled submit = %v", err)
+	}
+	invalid := []vial.SubmitRequest{
+		{},
+		{Name: "ok", IdempotencyKey: "key"},
+		{Name: "ok", Retry: vial.RetryPolicy{MaxAttempts: -1}},
+		{Name: "ok", Payload: make(chan int)},
+		{Name: "missing"},
+	}
+	for _, request := range invalid {
+		if _, err := executor.Submit(context.Background(), request); err == nil {
+			t.Fatalf("submit %#v unexpectedly succeeded", request)
+		}
+	}
+	if _, err := executor.Get(cancelled, "missing"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled get = %v", err)
+	}
+	if _, err := executor.Get(context.Background(), "missing"); !errors.Is(err, vial.ErrOperationNotFound) {
+		t.Fatalf("missing get = %v", err)
+	}
+	if err := executor.Cancel(cancelled, "missing"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled cancel = %v", err)
+	}
+	if err := executor.Cancel(context.Background(), "missing"); !errors.Is(err, vial.ErrOperationNotFound) {
+		t.Fatalf("missing cancel = %v", err)
+	}
+	if _, err := executor.Wait(context.Background(), "missing"); !errors.Is(err, vial.ErrOperationNotFound) {
+		t.Fatalf("missing wait = %v", err)
+	}
+	if _, err := executor.Metrics(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled metrics = %v", err)
+	}
+	if err := executor.Ready(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled ready = %v", err)
+	}
+	if err := executor.Ready(nil); err != nil {
+		t.Fatalf("ready executor: %v", err)
+	}
+
+	operation, err := executor.Submit(context.Background(), vial.SubmitRequest{Name: "ok"})
+	if err != nil {
+		t.Fatalf("submit valid operation: %v", err)
+	}
+	completed, err := executor.Wait(nil, operation.ID)
+	if err != nil || completed.Status != vial.OperationSucceeded {
+		t.Fatalf("wait = %#v, %v", completed, err)
+	}
+	if completed, err = executor.Wait(context.Background(), operation.ID); err != nil || completed.Status != vial.OperationSucceeded {
+		t.Fatalf("terminal wait = %#v, %v", completed, err)
+	}
+	if err := executor.Cancel(context.Background(), operation.ID); err != nil {
+		t.Fatalf("cancel completed operation: %v", err)
+	}
+	if _, err := executor.Metrics(nil); err != nil {
+		t.Fatalf("metrics: %v", err)
+	}
+	if err := executor.Shutdown(nil); err != nil {
+		t.Fatalf("shutdown executor: %v", err)
+	}
+	if err := executor.Shutdown(context.Background()); err != nil {
+		t.Fatalf("second shutdown: %v", err)
+	}
+	if err := <-executor.Done(); err != nil {
+		t.Fatalf("done error: %v", err)
+	}
+	if _, err := executor.Submit(context.Background(), vial.SubmitRequest{Name: "ok"}); !errors.Is(err, vial.ErrAsyncUnavailable) {
+		t.Fatalf("submit after shutdown = %v", err)
+	}
+}
+
+func TestMemoryExecutorWaitCancellationAndJobContract(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	executor := NewMemoryExecutor(WithWorkers(1), WithQueueSize(1))
+	executor.Handle("job", func(contextValue context.Context, job Job) (any, error) {
+		close(started)
+		if job.ID() == "" || job.Name() != "job" || job.Metadata()["user_id"] != "user-1" {
+			return nil, errors.New("invalid job contract")
+		}
+		if err := job.Decode(nil); err == nil {
+			return nil, errors.New("nil decode succeeded")
+		}
+		var number int
+		if err := job.Decode(&number); err == nil {
+			return nil, errors.New("invalid decode succeeded")
+		}
+		if err := job.Progress(contextValue, -1); !errors.Is(err, vial.ErrInvalidOperation) {
+			return nil, err
+		}
+		if err := job.Progress(contextValue, 101); !errors.Is(err, vial.ErrInvalidOperation) {
+			return nil, err
+		}
+		cancelled, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := job.Progress(cancelled, 10); !errors.Is(err, context.Canceled) {
+			return nil, err
+		}
+		if err := job.Progress(contextValue, 50); err != nil {
+			return nil, err
+		}
+		<-release
+		return "done", nil
+	})
+	startExecutor(t, executor)
+	operation, err := executor.Submit(context.Background(), vial.SubmitRequest{
+		Name:     "job",
+		Payload:  map[string]string{"value": "text"},
+		Metadata: map[string]string{"user_id": "user-1", "tenant_id": "tenant-1", "trace_id": "trace-1"},
+	})
+	if err != nil {
+		t.Fatalf("submit operation: %v", err)
+	}
+	<-started
+	waitContext, cancelWait := context.WithCancel(context.Background())
+	cancelWait()
+	if _, err := executor.Wait(waitContext, operation.ID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled wait = %v", err)
+	}
+	close(release)
+	completed := waitForStatus(t, executor, operation.ID, vial.OperationSucceeded)
+	if completed.Progress != 100 {
+		t.Fatalf("completed progress = %d", completed.Progress)
+	}
+	if err := executor.reportProgress(context.Background(), "missing", 10); !errors.Is(err, vial.ErrOperationNotFound) {
+		t.Fatalf("missing progress = %v", err)
+	}
+	if err := executor.reportProgress(context.Background(), operation.ID, 10); !errors.Is(err, vial.ErrOperationFinished) {
+		t.Fatalf("finished progress = %v", err)
+	}
+}
+
+func TestMemoryExecutorFailureRepresentations(t *testing.T) {
+	executor := NewMemoryExecutor(WithWorkers(1), WithQueueSize(4), WithTaskTimeout(10*time.Millisecond))
+	executor.Handle("encode", func(context.Context, Job) (any, error) { return make(chan int), nil })
+	executor.Handle("public", func(context.Context, Job) (any, error) { return nil, &vial.OperationError{} })
+	executor.Handle("late-success", func(contextValue context.Context, _ Job) (any, error) {
+		<-contextValue.Done()
+		return "late", nil
+	})
+	startExecutor(t, executor)
+
+	for _, test := range []struct {
+		name string
+		code string
+	}{
+		{name: "encode", code: "operation_failed"},
+		{name: "public", code: "operation_failed"},
+		{name: "late-success", code: "operation_timeout"},
+	} {
+		operation, err := executor.Submit(context.Background(), vial.SubmitRequest{Name: test.name})
+		if err != nil {
+			t.Fatalf("submit %s: %v", test.name, err)
+		}
+		operation = waitForStatus(t, executor, operation.ID, vial.OperationFailed)
+		if operation.Error == nil || operation.Error.Code != test.code || operation.Error.Message == "" {
+			t.Fatalf("%s error = %#v", test.name, operation.Error)
+		}
+		executor.run(operation.ID)
+	}
+	executor.run("missing")
+	executor.finish("missing", nil, nil, nil)
 }
