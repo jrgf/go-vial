@@ -154,6 +154,49 @@ api.Post("/users", createUser)
 
 Application middleware wraps all requests, including `404` and `405` responses. Group middleware wraps only endpoints registered through that group.
 
+## Modules
+
+A route group organizes HTTP endpoints. A module organizes one named business
+capability, such as users, billing, inventory, or administration.
+
+```go
+type UserModule struct {
+    service *UserService
+}
+
+func NewModule(service *UserService) *UserModule { return &UserModule{service: service} }
+
+func (module *UserModule) Name() string { return "users" }
+
+func (module *UserModule) Register(registrar *vial.Registrar) error {
+    users := registrar.Group("/users")
+    users.Get("/", module.list, vial.RouteName("users.list"))
+    users.Post("/", module.create, vial.RouteName("users.create"))
+    users.Get("/{id}", module.get, vial.RouteName("users.get"))
+    return nil
+}
+```
+
+Register modules before building or serving the application:
+
+```go
+if err := app.Register(
+    users.NewModule(userService),
+    orders.NewModule(orderService),
+); err != nil {
+    return err
+}
+```
+
+Registration is atomic. Each module gets an isolated registrar for routes,
+middleware, lifecycle hooks, supervised tasks, and health endpoints. See the
+runnable [`examples/modules`](examples/modules).
+
+Modules contain application functionality. Extensions provide technical
+infrastructure, such as sessions, databases, telemetry, authentication, task
+supervision, or a gRPC server. Vial does not require an extension interface;
+ordinary constructors and application options remain sufficient.
+
 ## JSON binding
 
 ```go
