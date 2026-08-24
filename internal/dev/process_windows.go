@@ -17,8 +17,8 @@ func interruptCommand(command *exec.Cmd) error {
 	if command.Process == nil {
 		return nil
 	}
-	// os.Interrupt is not implemented for Windows child processes in the same
-	// portable way as Unix signals, so the MVP terminates the child directly.
+	// Go cannot send os.Interrupt to a Windows child process through its portable
+	// API. Kill the process instead.
 	return command.Process.Kill()
 }
 

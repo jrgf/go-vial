@@ -67,11 +67,6 @@ func (writer *ResponseWriter) Unwrap() http.ResponseWriter {
 	return writer.ResponseWriter
 }
 
-type responseWriterCore interface {
-	http.ResponseWriter
-	Unwrap() http.ResponseWriter
-}
-
 type responseFlusher struct {
 	writer  *ResponseWriter
 	flusher http.Flusher
@@ -138,100 +133,99 @@ func preserveResponseWriterCapabilities(writer *ResponseWriter) http.ResponseWri
 	hijack := responseHijacker{hijacker: hijacker}
 	read := responseReaderFrom{writer: writer, readerFrom: readerFrom}
 	push := responsePusher{pusher: pusher}
-	core := responseWriterCore(writer)
 	switch mask {
 	case 1:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Flusher
-		}{core, flush}
+		}{writer, flush}
 	case 2:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Hijacker
-		}{core, hijack}
+		}{writer, hijack}
 	case 3:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Flusher
 			http.Hijacker
-		}{core, flush, hijack}
+		}{writer, flush, hijack}
 	case 4:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			io.ReaderFrom
-		}{core, read}
+		}{writer, read}
 	case 5:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Flusher
 			io.ReaderFrom
-		}{core, flush, read}
+		}{writer, flush, read}
 	case 6:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Hijacker
 			io.ReaderFrom
-		}{core, hijack, read}
+		}{writer, hijack, read}
 	case 7:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Flusher
 			http.Hijacker
 			io.ReaderFrom
-		}{core, flush, hijack, read}
+		}{writer, flush, hijack, read}
 	case 8:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Pusher
-		}{core, push}
+		}{writer, push}
 	case 9:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Flusher
 			http.Pusher
-		}{core, flush, push}
+		}{writer, flush, push}
 	case 10:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Hijacker
 			http.Pusher
-		}{core, hijack, push}
+		}{writer, hijack, push}
 	case 11:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Flusher
 			http.Hijacker
 			http.Pusher
-		}{core, flush, hijack, push}
+		}{writer, flush, hijack, push}
 	case 12:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			io.ReaderFrom
 			http.Pusher
-		}{core, read, push}
+		}{writer, read, push}
 	case 13:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Flusher
 			io.ReaderFrom
 			http.Pusher
-		}{core, flush, read, push}
+		}{writer, flush, read, push}
 	case 14:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Hijacker
 			io.ReaderFrom
 			http.Pusher
-		}{core, hijack, read, push}
+		}{writer, hijack, read, push}
 	case 15:
 		return struct {
-			responseWriterCore
+			*ResponseWriter
 			http.Flusher
 			http.Hijacker
 			io.ReaderFrom
 			http.Pusher
-		}{core, flush, hijack, read, push}
+		}{writer, flush, hijack, read, push}
 	default:
 		return writer
 	}

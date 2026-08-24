@@ -1,4 +1,4 @@
-// Package testkit provides lifecycle-aware HTTP helpers for Vial applications.
+// Package testkit runs Vial applications through their full lifecycle in HTTP tests.
 package testkit
 
 import (

@@ -2,14 +2,13 @@
 
 [![CI](https://github.com/jrgf/go-vial/actions/workflows/ci.yml/badge.svg)](https://github.com/jrgf/go-vial/actions/workflows/ci.yml)
 
-Vial is a Flask-inspired application framework built for Go and the standard
-`net/http` ecosystem. It combines explicit routing and errors, supervised
-lifecycle and background tasks, production-bounded HTTP defaults, testing
-helpers, and a fast rebuild loop without replacing Go's HTTP primitives.
+Vial is a Flask-inspired framework for Go's standard `net/http` package. It
+adds error-returning handlers, route groups, application lifecycle, background
+tasks, test helpers, and a rebuild loop without replacing Go's HTTP types.
 
-Choose Vial when standard handlers, middleware, listeners, request contexts,
-response writers, and `httptest` must remain first-class integration points.
-Its runtime has no dependencies outside the standard library.
+Use Vial when an application needs more structure than raw `net/http` but must
+still work with standard handlers, middleware, contexts, response writers, and
+`httptest`. The runtime uses only the standard library.
 
 ## Capabilities
 
@@ -33,27 +32,27 @@ Its runtime has no dependencies outside the standard library.
 - Last-known-good process remains online after compilation failures
 - No runtime dependencies outside the Go standard library
 
-## Examples by depth
+## Examples
 
-1. **Quickstart:** [`examples/hello`](examples/hello) is the smallest runnable
-   app and development-loop introduction.
-2. **API application:** [`examples/json-api`](examples/json-api) demonstrates
-   JSON binding and errors; the focused module, task, upload, event-stream,
-   config, secure-cookie, CSRF, and template examples add one concern at a time.
-3. **Async operations:** [`examples/async`](examples/async) demonstrates
+1. [`examples/hello`](examples/hello) is the smallest runnable app and
+   introduces the development loop.
+2. [`examples/json-api`](examples/json-api) demonstrates JSON binding and
+   errors. The module, task, upload, event-stream, config, secure-cookie, CSRF,
+   and template examples each cover one concern.
+3. [`examples/async`](examples/async) demonstrates
    submission, `Prefer: wait`, polling, cancellation, ownership, idempotency,
    readiness, and metrics with the bounded in-memory executor.
-4. **Complete applications:** [vial-gateway](https://github.com/jrgf/vial-gateway)
-   and [vialboard](https://github.com/jrgf/vialboard) demonstrate complete usage
-   of go-vial.
+4. [vial-gateway](https://github.com/jrgf/vial-gateway) and
+   [vialboard](https://github.com/jrgf/vialboard) are complete applications.
 
 ## Project status
 
-Vial is pre-1.0 while the public API and production evidence are finalized.
-The project began as a learning project and uses AI-assisted contributions;
-changes are expected to meet the same tests, review, security reporting, and
-compatibility policy as other contributions. Review release notes before using
-a pre-1.0 version in production.
+Vial is pre-1.0. The API freeze is complete, but the project still needs more
+production evidence and a release-candidate cycle. Vial began as a learning
+project and accepts AI-assisted contributions. Those changes go through the
+same tests, review, security reporting, and compatibility policy as any other
+contribution. Read the release notes before using a pre-1.0 version in
+production.
 
 ## Run it
 
@@ -533,7 +532,8 @@ app.HandleHTTP("GET /health", http.HandlerFunc(func(w http.ResponseWriter, _ *ht
 }))
 ```
 
-This is the primary escape hatch for existing middleware, metrics endpoints, profilers, and other `net/http` integrations.
+Mount a raw handler for existing middleware, metrics endpoints, profilers, and
+other `net/http` integrations.
 
 ## Development runner
 
@@ -665,8 +665,7 @@ The codebase is also compile-checked for Windows and macOS in CI.
 
 ## Go support
 
-Vial supports the current and previous supported Go releases. The current
-minimum is Go 1.25.
+Vial currently supports Go 1.25 and Go 1.26.
 
 ## Contributing
 

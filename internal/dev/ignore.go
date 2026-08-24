@@ -2,6 +2,7 @@ package dev
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -50,10 +51,8 @@ func (matcher *ignoreMatcher) Match(path string) bool {
 
 	for _, extra := range matcher.extras {
 		if !strings.ContainsRune(extra, filepath.Separator) {
-			for _, part := range parts {
-				if part == extra {
-					return true
-				}
+			if slices.Contains(parts, extra) {
+				return true
 			}
 			continue
 		}

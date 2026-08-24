@@ -104,8 +104,8 @@ func WithMaxHeaderBytes(bytes int) Option {
 	}
 }
 
-// WithTrustedProxies allows forwarding headers only from the listed IPs or
-// CIDRs. No proxies are trusted by default.
+// WithTrustedProxies trusts forwarding headers only when the direct peer
+// matches one of the listed IPs or CIDRs. The default trusts none.
 func WithTrustedProxies(values ...string) Option {
 	return func(cfg *config) {
 		for _, value := range values {

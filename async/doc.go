@@ -1,6 +1,5 @@
-// Package async provides Vial's bounded, in-memory asynchronous executor.
+// Package async contains Vial's bounded in-memory executor.
 //
-// MemoryExecutor is not durable: pending, running, completed, and idempotency
-// records are lost when the process exits. Use it only when losing work is
-// acceptable; use a durable AsyncExecutor for critical production workflows.
+// MemoryExecutor loses all operation and idempotency records when the process
+// exits. Use a durable AsyncExecutor when that data must survive a restart.
 package async

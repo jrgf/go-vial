@@ -5,7 +5,7 @@ Thank you for helping improve Vial. Keep contributions focused, small, and easy 
 ## Project principles
 
 - Prefer the Go standard library and native platform behavior.
-- Solve current, demonstrated needs; avoid scaffolding for possible future features.
+- Solve current needs. Do not add code for needs nobody has yet.
 - Preserve interoperability with `net/http`.
 - Keep the public API explicit and backwards-compatible where practical.
 - Fix behavior at the shared root cause and include a regression test.

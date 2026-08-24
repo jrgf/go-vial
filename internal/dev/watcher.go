@@ -25,9 +25,8 @@ type fileFingerprint struct {
 	mode       fs.FileMode
 }
 
-// Watcher recursively scans relevant project files. It intentionally uses only
-// the standard library in the MVP, which also makes it work on filesystems where
-// native notification APIs may be unavailable.
+// Watcher polls project files recursively. Polling uses only the standard
+// library and works on filesystems without native change notifications.
 type Watcher struct {
 	root     string
 	ignore   *ignoreMatcher

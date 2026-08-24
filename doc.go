@@ -1,3 +1,3 @@
-// Package vial provides a small, net/http-compatible web application kernel with
-// error-returning handlers, middleware, request helpers, and graceful serving.
+// Package vial is a small web application framework built on net/http. It adds
+// error-returning handlers, middleware, request helpers, and graceful shutdown.
 package vial

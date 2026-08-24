@@ -246,7 +246,7 @@ func (app *App) Build() error {
 		httpHandler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			contextValue, ok := request.Context().Value(requestContextKey{}).(*Context)
 			if !ok || contextValue == nil {
-				// This should only happen if a route handler is invoked outside App.ServeHTTP.
+				// A handler called outside App.ServeHTTP has no Vial context.
 				response := newResponseWriter(writer)
 				contextValue = newContext(app, response, request)
 			}
