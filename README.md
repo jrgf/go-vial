@@ -665,7 +665,7 @@ The codebase is also compile-checked for Windows and macOS in CI.
 
 ## Go support
 
-Vial currently supports Go 1.25 and Go 1.26.
+Vial requires Go 1.26.6 or newer and currently tests Go 1.26 and Go 1.27.
 
 ## Contributing
 

@@ -19,7 +19,7 @@ func TestPublicPackagesFromExternalModule(t *testing.T) {
 	directory := t.TempDir()
 	goMod := fmt.Sprintf(`module example.com/vial-compatibility
 
-go 1.25.0
+go 1.26.6
 
 require github.com/jrgf/go-vial v0.0.0
 
@@ -79,7 +79,7 @@ func TestApplication(t *testing.T) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	command := exec.Command("go", "test", "./...")
+	command := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "test", "./...")
 	command.Dir = directory
 	command.Env = append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local")
 	if output, err := command.CombinedOutput(); err != nil {

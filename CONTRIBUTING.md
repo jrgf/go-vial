@@ -12,7 +12,7 @@ Thank you for helping improve Vial. Keep contributions focused, small, and easy 
 
 ## Development setup
 
-Vial requires Go 1.25 or newer.
+Vial requires Go 1.26.6 or newer.
 
 ```bash
 git clone https://github.com/jrgf/go-vial.git

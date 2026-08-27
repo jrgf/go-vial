@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.1
+
+- Require Go 1.26.6 or newer to avoid known standard-library vulnerabilities.
+
 ## 0.17.0
 
 - Removed dead code
