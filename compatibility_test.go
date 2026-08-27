@@ -79,9 +79,9 @@ func TestApplication(t *testing.T) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	command := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "test", "./...")
+	command := exec.Command("go", "test", "./...")
 	command.Dir = directory
-	command.Env = append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local")
+	command.Env = append(os.Environ(), "GOWORK=off")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("external module test: %v\n%s", err, strings.TrimSpace(string(output)))
 	}
