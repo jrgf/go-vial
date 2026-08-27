@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.0
+
+- Removed dead code
+- Improved correctness 
+
 ## 0.16.0
 
 - Add lifecycle-managed asynchronous HTTP operations with RFC 7240 wait support,
