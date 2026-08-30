@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrgf/go-vial"
 	"github.com/jrgf/go-vial/testkit"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -23,7 +24,7 @@ import (
 const testToken = "test-token"
 
 func TestGRPCAndHTTPShareH2CListener(t *testing.T) {
-	server := testkit.Start(t, newApp(testToken))
+	server := testkit.Start(t, testApp(t))
 	client := healthv1.NewHealthClient(dial(t, strings.TrimPrefix(server.URL, "http://"), insecure.NewCredentials()))
 	contextValue, cancel := context.WithTimeout(authorized(context.Background()), 2*time.Second)
 	defer cancel()
@@ -41,7 +42,7 @@ func TestGRPCAndHTTPShareH2CListener(t *testing.T) {
 }
 
 func TestGRPCMetadataStatusAndStreamingShutdown(t *testing.T) {
-	server := testkit.Start(t, newApp(testToken))
+	server := testkit.Start(t, testApp(t))
 	client := healthv1.NewHealthClient(dial(t, strings.TrimPrefix(server.URL, "http://"), insecure.NewCredentials()))
 	contextValue, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -66,7 +67,7 @@ func TestGRPCMetadataStatusAndStreamingShutdown(t *testing.T) {
 }
 
 func TestGRPCOverTLS(t *testing.T) {
-	app := newApp(testToken)
+	app := testApp(t)
 	if err := app.Build(); err != nil {
 		t.Fatal(err)
 	}
@@ -106,4 +107,13 @@ func dial(t *testing.T, address string, transportCredentials credentials.Transpo
 
 func authorized(contextValue context.Context) context.Context {
 	return metadata.AppendToOutgoingContext(contextValue, "authorization", "Bearer "+testToken)
+}
+
+func testApp(t *testing.T) *vial.App {
+	t.Helper()
+	app, err := newApp(testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
 }

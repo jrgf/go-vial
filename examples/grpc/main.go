@@ -8,6 +8,7 @@ import (
 	"os"
 
 	vial "github.com/jrgf/go-vial"
+	"github.com/jrgf/go-vial/vialgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
@@ -26,34 +27,41 @@ func main() {
 	}
 
 	log.Print("HTTP and gRPC listening on http://localhost:8080")
-	if err := newApp(token).Run(context.Background(), ":8080"); err != nil {
+	app, err := newApp(token)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := app.Run(context.Background(), ":8080"); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func newApp(token string) *vial.App {
-	protocols := new(http.Protocols)
-	protocols.SetHTTP1(true)
-	protocols.SetHTTP2(true)
-	protocols.SetUnencryptedHTTP2(true)
-
-	app := vial.New(vial.WithHTTPProtocols(protocols))
+func newApp(token string) (*vial.App, error) {
+	app := vial.New(vial.WithHTTPProtocols(vialgrpc.H2CProtocols()))
 	app.Get("/healthz", func(contextValue *vial.Context) error {
 		return contextValue.Text(http.StatusOK, "ok\n")
 	})
 
-	server := grpc.NewServer(
-		grpc.UnaryInterceptor(authenticateUnary(token)),
-		grpc.StreamInterceptor(authenticateStream(token)),
-		grpc.MaxRecvMsgSize(maxMessageSize),
-		grpc.MaxSendMsgSize(maxMessageSize),
-	)
+	module, err := vialgrpc.New(vialgrpc.Config{
+		MaxReceiveBytes: maxMessageSize,
+		MaxSendBytes:    maxMessageSize,
+		ServerOptions: []grpc.ServerOption{
+			grpc.UnaryInterceptor(authenticateUnary(token)),
+			grpc.StreamInterceptor(authenticateStream(token)),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	server := module.Server()
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", healthv1.HealthCheckResponse_SERVING)
 	healthv1.RegisterHealthServer(server, healthServer)
 	reflection.Register(server)
-	app.HandleHTTP("/", server)
-	return app
+	if err := app.Register(module); err != nil {
+		return nil, err
+	}
+	return app, nil
 }
 
 func authenticateUnary(token string) grpc.UnaryServerInterceptor {

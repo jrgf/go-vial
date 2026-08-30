@@ -21,9 +21,9 @@ batteries may use focused dependencies.
 - Collision-safe typed context values and trusted-proxy client IPs
 - Supervised startup, shutdown, background tasks, liveness, and readiness
 - RFC 7240 asynchronous operations with polling and cancellation
-- Server-Sent Events through standard HTTP streaming primitives
-- WebSocket integration through standard handlers and request cancellation
-- gRPC integration through standard handlers and native HTTP/2 protocols
+- Bounded Server-Sent Event fan-out with heartbeats and slow-consumer policy
+- Lifecycle-aware coder/websocket handlers with origin and message limits
+- grpc-go lifecycle modules with message limits, h2c, and graceful shutdown
 - Encrypted cookie sessions with secure defaults, flash values, and key rotation
 - Provider-neutral request identities and authentication/grant guards
 - Restrictive browser security headers and bounded local rate limiting
@@ -53,17 +53,19 @@ batteries may use focused dependencies.
 3. [`examples/async`](examples/async) demonstrates
    submission, `Prefer: wait`, polling, cancellation, ownership, idempotency,
    readiness, and metrics with the bounded in-memory executor.
-4. [`examples/websocket`](examples/websocket) uses `coder/websocket` through a
+4. [`examples/sse`](examples/sse) uses the bounded `sse.Hub` with a standard
+   EventSource response.
+5. [`examples/websocket`](examples/websocket) uses `coder/websocket` through a
    standard handler with Vial middleware, limits, and graceful shutdown.
-5. [`examples/grpc`](examples/grpc) shares one h2c listener with HTTP routes and
+6. [`examples/grpc`](examples/grpc) shares one h2c listener with HTTP routes and
    demonstrates standard interceptors, TLS, streaming, and graceful shutdown.
-6. [`examples/observability`](examples/observability) exposes HTTP metrics and
+7. [`examples/observability`](examples/observability) exposes HTTP metrics and
    correlates request and W3C trace IDs in structured logs.
-7. [`examples/database`](examples/database) wires PostgreSQL lifecycle,
+8. [`examples/database`](examples/database) wires PostgreSQL lifecycle,
    readiness, transactions, and embedded migrations.
-8. [`examples/openapi`](examples/openapi) generates and serves an OpenAPI 3.1
+9. [`examples/openapi`](examples/openapi) generates and serves an OpenAPI 3.1
    document from named routes and Go types.
-9. [vial-gateway](https://github.com/jrgf/vial-gateway) and
+10. [vial-gateway](https://github.com/jrgf/vial-gateway) and
    [vialboard](https://github.com/jrgf/vialboard) are complete applications.
 
 ## Project status
@@ -216,6 +218,14 @@ Modules contain application functionality. Extensions provide technical
 infrastructure, such as sessions, databases, telemetry, authentication, task
 supervision, or a gRPC server. Vial does not require an extension interface;
 ordinary constructors and application options remain sufficient.
+
+## Realtime
+
+The [`sse`](sse) package writes events and provides bounded process-local
+fan-out. [`vialws`](vialws) closes coder/websocket connections with the Vial
+request lifecycle. [`vialgrpc`](vialgrpc) mounts grpc-go with message limits and
+bounded graceful shutdown. Deployment limits and examples are in
+[`docs/realtime.md`](docs/realtime.md).
 
 ## JSON binding
 
@@ -795,6 +805,9 @@ Builds never run concurrently. Changes detected during a build remain queued for
 ├── session/               # encrypted client-side cookie sessions
 ├── sqlkit/                # database/sql transactions and migrations
 ├── openapi/               # OpenAPI 3.1 generation and document handler
+├── sse/                   # bounded Server-Sent Event fan-out
+├── vialws/                # coder/websocket lifecycle adapter
+├── vialgrpc/              # grpc-go lifecycle module
 ├── middleware/            # request ID, logging, recovery, browser policy, and rate limits
 ├── internal/dev/          # watcher, builder, runner, and process control
 ├── cmd/vial/              # development and load-check CLI
@@ -815,9 +828,9 @@ wrappers would hide behavior that applications need to verify.
 | Battery | Supported test path |
 |---|---|
 | HTTP, sessions, authentication, security, observability | `testkit.Start`, `Server.JSON`, `Server.Multipart`, and `RequireRoute` |
-| SSE | `httptest.Server`, `http.Client`, and `bufio.Reader` |
-| WebSocket | `testkit.Start` and `coder/websocket` |
-| gRPC | `testkit.Start` and the generated grpc-go client |
+| SSE | `sse.Hub`, `testkit.Start`, `http.Client`, and `bufio.Reader` |
+| WebSocket | `vialws.NewHandler`, `testkit.Start`, and `coder/websocket` |
+| gRPC | `vialgrpc.New`, `testkit.Start`, and the generated grpc-go client |
 | SQL | `database/sql` with a test driver; run database integration tests for the selected production driver |
 | Async operations | In-memory executor tests plus the selected persistent adapter's integration tests |
 | OpenAPI | Generate or fetch JSON, decode it, and assert the documented operation and schema |

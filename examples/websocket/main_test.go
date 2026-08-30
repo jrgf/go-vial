@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/jrgf/go-vial"
 	"github.com/jrgf/go-vial/testkit"
 )
 
 const testToken = "test-token"
 
 func TestWebSocketEchoUsesVialMiddleware(t *testing.T) {
-	server := testkit.Start(t, newApp(testToken))
+	server := testkit.Start(t, testApp(t))
 	contextValue, cancel := testContext(t)
 	defer cancel()
 
@@ -34,7 +35,7 @@ func TestWebSocketEchoUsesVialMiddleware(t *testing.T) {
 }
 
 func TestWebSocketRejectsMalformedHandshakeAndCrossOrigin(t *testing.T) {
-	server := testkit.Start(t, newApp(testToken))
+	server := testkit.Start(t, testApp(t))
 
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/ws", nil)
 	if err != nil {
@@ -70,7 +71,7 @@ func TestWebSocketRejectsMalformedHandshakeAndCrossOrigin(t *testing.T) {
 }
 
 func TestWebSocketEnforcesMessageLimit(t *testing.T) {
-	server := testkit.Start(t, newApp(testToken))
+	server := testkit.Start(t, testApp(t))
 	connection := dialAuthorized(t, server.URL, nil)
 	defer func() { _ = connection.CloseNow() }()
 	contextValue, cancel := testContext(t)
@@ -85,7 +86,7 @@ func TestWebSocketEnforcesMessageLimit(t *testing.T) {
 }
 
 func TestWebSocketConnectionsAreConcurrent(t *testing.T) {
-	server := testkit.Start(t, newApp(testToken))
+	server := testkit.Start(t, testApp(t))
 	for index := range 8 {
 		t.Run(strconv.Itoa(index), func(t *testing.T) {
 			t.Parallel()
@@ -97,7 +98,7 @@ func TestWebSocketConnectionsAreConcurrent(t *testing.T) {
 }
 
 func TestWebSocketClosesDuringApplicationShutdown(t *testing.T) {
-	server := testkit.Start(t, newApp(testToken))
+	server := testkit.Start(t, testApp(t))
 	connection := dialAuthorized(t, server.URL, nil)
 	defer func() { _ = connection.CloseNow() }()
 
@@ -162,4 +163,13 @@ func websocketURL(serverURL string) string {
 func testContext(t *testing.T) (context.Context, context.CancelFunc) {
 	t.Helper()
 	return context.WithTimeout(t.Context(), 2*time.Second)
+}
+
+func testApp(t *testing.T) *vial.App {
+	t.Helper()
+	app, err := newApp(testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
 }

@@ -4,17 +4,21 @@ import (
 	"bufio"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jrgf/go-vial/testkit"
 )
 
 func TestEventStream(t *testing.T) {
-	server := httptest.NewServer(newApp(time.Millisecond))
-	defer server.Close()
+	app, err := newApp(time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := testkit.Start(t, app)
 
-	response, err := server.Client().Get(server.URL + "/events")
+	response, err := server.Client.Get(server.URL + "/events")
 	if err != nil {
 		t.Fatalf("get event stream: %v", err)
 	}
@@ -33,9 +37,13 @@ func TestEventStream(t *testing.T) {
 		t.Fatalf("cache control = %q", cacheControl)
 	}
 
-	line, err := bufio.NewReader(response.Body).ReadString('\n')
-	if err != nil {
-		t.Fatalf("read event: %v", err)
+	reader := bufio.NewReader(response.Body)
+	var line string
+	for !strings.HasPrefix(line, "data:") {
+		line, err = reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read event: %v", err)
+		}
 	}
 	var event Event
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(line), "data: ")), &event); err != nil {
