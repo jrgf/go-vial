@@ -15,6 +15,8 @@
   PostgreSQL lifecycle and readiness example.
 - Add deterministic OpenAPI 3.1 generation, request and response schemas,
   security metadata, and a cached JSON document endpoint.
+- Add atomic project scaffolding, configuration validation, in-process OpenAPI
+  export, and machine-readable CLI diagnostics.
 
 ## 0.18.0
 - gRPC,SSE,Websockets examples

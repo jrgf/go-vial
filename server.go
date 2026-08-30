@@ -60,7 +60,7 @@ func (app *App) Run(contextValue context.Context, address string) error {
 
 func (app *App) writeHTTPInspection(contextValue context.Context, path, output string) error {
 	parsed, err := url.ParseRequestURI(path)
-	if err != nil || parsed.IsAbs() || !strings.HasPrefix(path, "/") {
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
 		return fmt.Errorf("inspect HTTP path %q: invalid path", path)
 	}
 	if err := app.Build(); err != nil {

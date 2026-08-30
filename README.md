@@ -37,6 +37,7 @@ batteries may use focused dependencies.
 - Graceful HTTP shutdown
 - Raw `http.Handler` mounting
 - Standard `httptest` compatibility
+- Project creation, route/config diagnostics, and OpenAPI export through `vial`
 - `vial dev` automatic build-and-restart loop
 - `vial load` bounded HTTP load checks and CI thresholds
 - Last-known-good process remains online after compilation failures
@@ -633,13 +634,27 @@ app.HandleHTTP("GET /health", http.HandlerFunc(func(w http.ResponseWriter, _ *ht
 Mount a raw handler for existing middleware, metrics endpoints, profilers, and
 other `net/http` integrations.
 
-## Development runner
+## Command-line workflow
 
 Build the CLI:
 
 ```bash
 go install ./cmd/vial
 ```
+
+Create a minimal service:
+
+```bash
+vial new --module example.com/service ./service
+cd ./service
+go mod tidy
+go run .
+```
+
+The generated service includes liveness, readiness, request IDs, logging,
+panic recovery, security headers, and graceful shutdown.
+
+### Development runner
 
 Usage:
 
@@ -700,7 +715,22 @@ Validate configuration and application build setup without starting the server:
 
 ```bash
 vial doctor ./examples/config
+vial doctor --json ./examples/config
+vial config --json ./examples/config
 ```
+
+`config` reports validation only. It never prints application-owned values or
+secrets.
+
+Export the OpenAPI document served by an application without binding a port:
+
+```bash
+vial openapi ./examples/openapi
+vial openapi --output openapi.json ./examples/openapi
+```
+
+The default endpoint is `/openapi.json`; override it with `--path`. Export
+builds the application but does not run startup or shutdown hooks.
 
 Run a bounded load check against a deployed endpoint:
 
@@ -714,10 +744,17 @@ vial load --max-error-rate 1 --max-p95 250ms http://localhost:8080/
 - `vial`, `help`, `--help`, `-h`, and subcommand help exit with status 0.
 - Unknown commands, invalid arguments, runtime failures, and failed load
   thresholds exit with status 1.
+- `vial new --json` writes `directory`, `module`, `go`, and `vial` fields.
 - `vial routes --json` writes an indented JSON array of `vial.Route` values to
   standard output.
+- `vial doctor --json` writes `ok`, `routes`, `named_routes`, and `go` fields.
+- `vial config --json` writes `{"valid": true}` after application construction
+  and route validation succeed.
+- `vial openapi` writes an OpenAPI 3.1 JSON document to standard output or the
+  file selected by `--output`.
 - `vial version --verbose` writes stable `version=`, `commit=`, and `go=` lines
   to standard output.
+- `vial version --json` writes `version`, `commit`, and `go` fields.
 - `vial load` writes its final summary to standard output and progress to
   standard error, keeping redirected summaries clean.
 
@@ -771,6 +808,22 @@ go test ./...
 go test -race ./...
 go vet ./...
 ```
+
+Use the existing protocol client at the integration boundary. Extra Vial
+wrappers would hide behavior that applications need to verify.
+
+| Battery | Supported test path |
+|---|---|
+| HTTP, sessions, authentication, security, observability | `testkit.Start`, `Server.JSON`, `Server.Multipart`, and `RequireRoute` |
+| SSE | `httptest.Server`, `http.Client`, and `bufio.Reader` |
+| WebSocket | `testkit.Start` and `coder/websocket` |
+| gRPC | `testkit.Start` and the generated grpc-go client |
+| SQL | `database/sql` with a test driver; run database integration tests for the selected production driver |
+| Async operations | In-memory executor tests plus the selected persistent adapter's integration tests |
+| OpenAPI | Generate or fetch JSON, decode it, and assert the documented operation and schema |
+
+The maintained examples under `examples/` are runnable reference tests for
+each row.
 
 The codebase is also compile-checked for Windows and macOS in CI.
 

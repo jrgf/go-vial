@@ -562,6 +562,33 @@ func TestRunWritesRouteInspectionWithoutListening(t *testing.T) {
 	}
 }
 
+func TestRunWritesHTTPInspectionWithoutListening(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "document.json")
+	t.Setenv("VIAL_HTTP_INSPECTION_OUTPUT", output)
+	t.Setenv("VIAL_HTTP_INSPECTION_PATH", "/document")
+
+	app := vial.New()
+	app.Get("/document", func(contextValue *vial.Context) error {
+		return contextValue.JSON(http.StatusOK, map[string]string{"openapi": "3.1.0"})
+	})
+	if err := app.Run(context.Background(), "not a valid address"); err != nil {
+		t.Fatalf("inspect HTTP endpoint: %v", err)
+	}
+
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("read HTTP inspection: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != `{"openapi":"3.1.0"}` {
+		t.Fatalf("HTTP inspection = %q", got)
+	}
+
+	t.Setenv("VIAL_HTTP_INSPECTION_PATH", "//example.com/document")
+	if err := vial.New().Run(context.Background(), "not a valid address"); err == nil || !strings.Contains(err.Error(), "invalid path") {
+		t.Fatalf("invalid HTTP inspection path error = %v", err)
+	}
+}
+
 func TestApplicationIsImmutableAfterBuild(t *testing.T) {
 	app := vial.New()
 	if err := app.Build(); err != nil {

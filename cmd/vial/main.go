@@ -27,7 +27,11 @@ var (
 	loadProgressInterval = time.Second
 )
 
-const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
+const (
+	routesOutputEnvironment         = "VIAL_ROUTES_OUTPUT"
+	httpInspectionOutputEnvironment = "VIAL_HTTP_INSPECTION_OUTPUT"
+	httpInspectionPathEnvironment   = "VIAL_HTTP_INSPECTION_PATH"
+)
 
 type stringList []string
 
@@ -61,12 +65,18 @@ func run(arguments []string) error {
 	}
 
 	switch arguments[0] {
+	case "new":
+		return runNew(arguments[1:], os.Stdout)
 	case "dev":
 		return runDev(arguments[1:])
 	case "routes":
 		return runRoutes(arguments[1:], os.Stdout)
 	case "doctor":
 		return runDoctor(arguments[1:], os.Stdout)
+	case "config":
+		return runConfig(arguments[1:], os.Stdout)
+	case "openapi":
+		return runOpenAPI(arguments[1:], os.Stdout)
 	case "load":
 		return runLoad(arguments[1:], os.Stdout, os.Stderr)
 	case "version", "--version", "-v":
@@ -85,15 +95,22 @@ func printVersion(arguments []string, output io.Writer) error {
 		return err
 	}
 	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
-		_, err := fmt.Fprintln(output, "Usage: vial version [--verbose]")
+		_, err := fmt.Fprintln(output, "Usage: vial version [--verbose|--json]")
 		return err
-	}
-	if len(arguments) != 1 || arguments[0] != "--verbose" {
-		return fmt.Errorf("usage: vial version [--verbose]")
 	}
 	goVersion := buildGoVersion
 	if goVersion == "" {
 		goVersion = runtime.Version()
+	}
+	if len(arguments) == 1 && arguments[0] == "--json" {
+		return writeJSON(output, map[string]string{
+			"version": version,
+			"commit":  commit,
+			"go":      goVersion,
+		})
+	}
+	if len(arguments) != 1 || arguments[0] != "--verbose" {
+		return fmt.Errorf("usage: vial version [--verbose|--json]")
 	}
 	_, err := fmt.Fprintf(output, "version=%s\ncommit=%s\ngo=%s\n", version, commit, goVersion)
 	return err
@@ -261,8 +278,9 @@ func runDoctor(arguments []string, output io.Writer) error {
 	frameworkArguments, applicationArguments := splitApplicationArguments(arguments)
 	flags := flag.NewFlagSet("vial doctor", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	jsonOutput := flags.Bool("json", false, "print diagnostics as JSON")
 	flags.Usage = func() {
-		_, _ = fmt.Fprintln(flags.Output(), "Usage: vial doctor [package] [-- application arguments]")
+		_, _ = fmt.Fprintln(flags.Output(), "Usage: vial doctor [--json] [package] [-- application arguments]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(frameworkArguments); err != nil {
@@ -280,6 +298,20 @@ func runDoctor(arguments []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if *jsonOutput {
+		named := 0
+		for _, route := range routes {
+			if route.Name != "" {
+				named++
+			}
+		}
+		return writeJSON(output, map[string]any{
+			"ok":           true,
+			"routes":       len(routes),
+			"named_routes": named,
+			"go":           runtime.Version(),
+		})
+	}
 	if _, err := fmt.Fprintf(output, "vial doctor: ok (routes: %d)\n", len(routes)); err != nil {
 		return fmt.Errorf("write doctor result: %w", err)
 	}
@@ -287,6 +319,18 @@ func runDoctor(arguments []string, output io.Writer) error {
 }
 
 func inspectApplication(target string, applicationArguments []string) ([]vial.Route, error) {
+	data, err := inspectOutput(target, applicationArguments, routesOutputEnvironment)
+	if err != nil {
+		return nil, err
+	}
+	var routes []vial.Route
+	if err := json.Unmarshal(data, &routes); err != nil {
+		return nil, fmt.Errorf("decode inspection output: %w", err)
+	}
+	return routes, nil
+}
+
+func inspectOutput(target string, applicationArguments []string, outputEnvironment string, extraEnvironment ...string) ([]byte, error) {
 	workingDirectory, resolvedTarget, err := dev.ResolvePackage("", target)
 	if err != nil {
 		return nil, err
@@ -304,7 +348,9 @@ func inspectApplication(target string, applicationArguments []string) ([]vial.Ro
 	commandArguments := append([]string{"run", resolvedTarget}, applicationArguments...)
 	command := exec.Command("go", commandArguments...)
 	command.Dir = workingDirectory
-	command.Env = append(os.Environ(), routesOutputEnvironment+"="+outputPath)
+	command.Env = inspectionEnvironment(os.Environ())
+	command.Env = append(command.Env, outputEnvironment+"="+outputPath)
+	command.Env = append(command.Env, extraEnvironment...)
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stderr
 	command.Stderr = os.Stderr
@@ -319,11 +365,26 @@ func inspectApplication(target string, applicationArguments []string) ([]vial.Ro
 	if strings.TrimSpace(string(data)) == "" {
 		return nil, fmt.Errorf("application did not call App.Run; use App.Routes directly")
 	}
-	var routes []vial.Route
-	if err := json.Unmarshal(data, &routes); err != nil {
-		return nil, fmt.Errorf("decode inspection output: %w", err)
+	return data, nil
+}
+
+func inspectionEnvironment(environment []string) []string {
+	filtered := make([]string, 0, len(environment))
+	for _, value := range environment {
+		if strings.HasPrefix(value, routesOutputEnvironment+"=") ||
+			strings.HasPrefix(value, httpInspectionOutputEnvironment+"=") ||
+			strings.HasPrefix(value, httpInspectionPathEnvironment+"=") {
+			continue
+		}
+		filtered = append(filtered, value)
 	}
-	return routes, nil
+	return filtered
+}
+
+func writeJSON(output io.Writer, value any) error {
+	encoder := json.NewEncoder(output)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
 }
 
 func writeRoutes(output io.Writer, routes []vial.Route, jsonOutput bool) error {
@@ -370,18 +431,24 @@ func printUsage() {
 	fmt.Printf(`vial %s
 
 Usage:
+  vial new [--module path] [--json] directory
   vial dev [flags] [package] [-- application arguments]
   vial routes [--json] [package] [-- application arguments]
-  vial doctor [package] [-- application arguments]
+  vial doctor [--json] [package] [-- application arguments]
+  vial config [--json] [package] [-- application arguments]
+  vial openapi [--path path] [--output file] [package] [-- application arguments]
   vial load [flags] URL
-  vial version
+  vial version [--verbose|--json]
 
 Examples:
+  vial new --module example.com/service ./service
   vial dev ./cmd/server
   vial dev --verbose ./examples/hello
   vial dev ./cmd/server -- --config ./config/dev.json
   vial routes ./examples/hello
   vial doctor ./examples/hello
+  vial config --json ./examples/config
+  vial openapi --output openapi.json ./examples/openapi
   vial load --workers 100 --duration 10s http://localhost:8080/
 
 `, version)
