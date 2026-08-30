@@ -63,6 +63,40 @@ func TestResponseWriterFlushAndPush(t *testing.T) {
 	}
 }
 
+func TestResponseWriterRunsBeforeCommitHooksOnce(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writer := newResponseWriter(recorder)
+	var calls int
+	if !writer.beforeCommit(func(header http.Header) {
+		calls++
+		header.Set("X-Before-Commit", "yes")
+	}) {
+		t.Fatal("failed to register hook before commitment")
+	}
+	writer.WriteHeader(http.StatusCreated)
+	writer.WriteHeader(http.StatusAccepted)
+	if calls != 1 || recorder.Header().Get("X-Before-Commit") != "yes" {
+		t.Fatalf("calls=%d header=%q", calls, recorder.Header().Get("X-Before-Commit"))
+	}
+	if writer.beforeCommit(func(http.Header) {}) {
+		t.Fatal("registered hook after commitment")
+	}
+}
+
+func TestContextRejectsInvalidBeforeCommitHooks(t *testing.T) {
+	writer := newResponseWriter(httptest.NewRecorder())
+	context := newContext(New(), writer, httptest.NewRequest(http.MethodGet, "/", nil))
+	if err := context.BeforeCommit(nil); err == nil {
+		t.Fatal("accepted nil before-commit hook")
+	}
+	if err := context.NoContent(http.StatusNoContent); err != nil {
+		t.Fatal(err)
+	}
+	if err := context.BeforeCommit(func(http.Header) {}); err == nil {
+		t.Fatal("accepted before-commit hook after response commitment")
+	}
+}
+
 func TestResponseWriterPreservesOnlyUnderlyingCapabilities(t *testing.T) {
 	plain := &plainWriter{header: make(http.Header)}
 	tests := []struct {

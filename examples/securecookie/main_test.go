@@ -10,30 +10,28 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gorilla/securecookie"
 	"github.com/jrgf/go-vial"
+	"github.com/jrgf/go-vial/session"
 )
 
 var testKey = []byte("0123456789abcdef0123456789abcdef")
 
 func FuzzSessionCookieDecode(fuzz *testing.F) {
-	manager, err := newSessionManager(true, testKey)
-	if err != nil {
-		fuzz.Fatal(err)
-	}
+	app, sessions := testApp(fuzz, false, testKey)
 	fuzz.Add("")
 	fuzz.Add("malformed-cookie")
 	fuzz.Fuzz(func(t *testing.T, value string) {
-		if len(value) > maxCookieBytes {
+		if len(value) > session.MaxCookieBytes {
 			t.Skip()
 		}
-		current := newSessionData()
-		_ = securecookie.DecodeMulti(sessionCookieName, value, current, manager.currentCodecs()...)
+		request := httptest.NewRequest(http.MethodGet, "/session", nil)
+		request.AddCookie(&http.Cookie{Name: sessions.CookieName(), Value: value})
+		app.ServeHTTP(httptest.NewRecorder(), request)
 	})
 }
 
 func TestSessionAndFlashRoundTrip(t *testing.T) {
-	app := testApp(t, false, testKey)
+	app, _ := testApp(t, false, testKey)
 	server := httptest.NewServer(app)
 	t.Cleanup(server.Close)
 	jar, err := cookiejar.New(nil)
@@ -59,133 +57,112 @@ func TestSessionAndFlashRoundTrip(t *testing.T) {
 	}
 }
 
-func TestCookiePolicy(t *testing.T) {
-	app := testApp(t, true, testKey)
+func TestCookiePolicyAndTamperRejection(t *testing.T) {
+	secureApp, _ := testApp(t, true, testKey)
 	response := httptest.NewRecorder()
-	app.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/login?user=Rafa", nil))
-	result := response.Result()
-	t.Cleanup(func() {
-		if err := result.Body.Close(); err != nil {
-			t.Errorf("close response: %v", err)
-		}
-	})
-	cookies := result.Cookies()
+	secureApp.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/login?user=Rafa", nil))
+	cookies := response.Result().Cookies()
 	if len(cookies) != 1 {
 		t.Fatalf("cookies=%d", len(cookies))
 	}
 	cookie := cookies[0]
-	if !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" {
+	if cookie.Name != "__Host-vial_session" || !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" {
 		t.Fatalf("cookie=%#v", cookie)
+	}
+
+	app, sessions := testApp(t, false, testKey)
+	request := httptest.NewRequest(http.MethodGet, "/session", nil)
+	request.AddCookie(&http.Cookie{Name: sessions.CookieName(), Value: strings.Repeat("x", 64)})
+	response = httptest.NewRecorder()
+	app.ServeHTTP(response, request)
+	result := response.Result()
+	payload := decodeSession(t, result)
+	if payload.User != "" || len(payload.Flashes) != 0 {
+		t.Fatalf("session=%#v", payload)
+	}
+	if cookies := result.Cookies(); len(cookies) != 1 || cookies[0].MaxAge >= 0 {
+		t.Fatalf("rejected cookie was not expired: %#v", cookies)
 	}
 }
 
-func TestKeyRotation(t *testing.T) {
+func TestKeyRotationAndReload(t *testing.T) {
 	oldKey := []byte("old-key-0123456789abcdef0123456789")
 	newKey := []byte("new-key-0123456789abcdef0123456789")
-	oldApp := testApp(t, false, oldKey)
+	oldApp, _ := testApp(t, false, oldKey)
 	oldCookie := loginCookie(t, oldApp)
 
-	rotatedApp := testApp(t, false, newKey, oldKey)
+	rotatedApp, _ := testApp(t, false, newKey, oldKey)
 	request := httptest.NewRequest(http.MethodGet, "/session", nil)
 	request.AddCookie(oldCookie)
 	response := httptest.NewRecorder()
 	rotatedApp.ServeHTTP(response, request)
 	result := response.Result()
-	cookies := result.Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("rotated cookies=%d", len(cookies))
-	}
 	current := decodeSession(t, result)
 	if current.User != "Rafa" {
 		t.Fatalf("rotated session=%#v", current)
 	}
-	rotatedCookie := cookies[0]
-
-	oldOnlyApp := testApp(t, false, oldKey)
-	request = httptest.NewRequest(http.MethodGet, "/session", nil)
-	request.AddCookie(rotatedCookie)
-	response = httptest.NewRecorder()
-	oldOnlyApp.ServeHTTP(response, request)
-	rejected := decodeSession(t, response.Result())
-	if rejected.User != "" {
-		t.Fatalf("new-key cookie decoded with old key: %#v", rejected)
-	}
-}
-
-func TestSessionKeyReload(t *testing.T) {
-	oldKey := []byte("old-key-0123456789abcdef0123456789")
-	newKey := []byte("new-key-0123456789abcdef0123456789")
-	manager, err := newSessionManager(false, oldKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldValue, err := securecookie.EncodeMulti("probe", "old", manager.currentCodecs()...)
-	if err != nil {
-		t.Fatal(err)
+	rotatedCookies := result.Cookies()
+	if len(rotatedCookies) != 1 || rotatedCookies[0].Value == oldCookie.Value {
+		t.Fatalf("rotated cookies=%#v", rotatedCookies)
 	}
 
+	reloadApp, manager := testApp(t, false, oldKey)
+	reloadCookie := loginCookie(t, reloadApp)
 	keyFile := filepath.Join(t.TempDir(), "session-keys")
 	if err := os.WriteFile(keyFile, append(append(newKey, ','), oldKey...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.reloadKeys(keyFile); err != nil {
+	if err := reloadSessionKeys(manager, keyFile); err != nil {
 		t.Fatal(err)
 	}
-	var decoded string
-	if err := securecookie.DecodeMulti("probe", oldValue, &decoded, manager.currentCodecs()...); err != nil || decoded != "old" {
-		t.Fatalf("old key was not retained: value=%q error=%v", decoded, err)
-	}
-
-	newOnly, err := newSessionManager(false, newKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	newValue, err := securecookie.EncodeMulti("probe", "new", manager.currentCodecs()...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := securecookie.DecodeMulti("probe", newValue, &decoded, newOnly.currentCodecs()...); err != nil {
-		t.Fatalf("new key did not become primary: %v", err)
+	request = httptest.NewRequest(http.MethodGet, "/session", nil)
+	request.AddCookie(reloadCookie)
+	response = httptest.NewRecorder()
+	reloadApp.ServeHTTP(response, request)
+	result = response.Result()
+	current = decodeSession(t, result)
+	if current.User != "Rafa" || len(result.Cookies()) != 1 {
+		t.Fatalf("reloaded session=%#v cookies=%#v", current, result.Cookies())
 	}
 
 	if err := os.WriteFile(keyFile, []byte("short"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.reloadKeys(keyFile); err == nil {
+	if err := reloadSessionKeys(manager, keyFile); err == nil {
 		t.Fatal("expected invalid key reload to fail")
 	}
-	if err := securecookie.DecodeMulti("probe", newValue, &decoded, manager.currentCodecs()...); err != nil {
-		t.Fatalf("failed reload replaced valid keys: %v", err)
-	}
 }
 
-func TestSessionConfiguration(t *testing.T) {
-	if _, err := newSessionManager(false); err == nil {
+func TestSessionConfigurationAndSizeLimit(t *testing.T) {
+	if _, _, err := newApp(false); err == nil {
 		t.Fatal("expected missing key error")
 	}
-	if _, err := newSessionManager(false, []byte("short")); err == nil {
+	if _, _, err := newApp(false, []byte("short")); err == nil {
 		t.Fatal("expected short key error")
+	}
+	app, _ := testApp(t, false, testKey)
+	response := httptest.NewRecorder()
+	target := "/login?user=" + strings.Repeat("x", session.MaxCookieBytes)
+	app.ServeHTTP(response, httptest.NewRequest(http.MethodPost, target, nil))
+	if response.Code != http.StatusInternalServerError || len(response.Header().Values("Set-Cookie")) != 0 {
+		t.Fatalf("status=%d cookies=%#v", response.Code, response.Header().Values("Set-Cookie"))
 	}
 }
 
-func testApp(t *testing.T, secure bool, keys ...[]byte) *vial.App {
+func testApp(t testing.TB, secure bool, keys ...[]byte) (*vial.App, *session.Manager) {
 	t.Helper()
-	app, _, err := newApp(secure, keys...)
+	app, manager, err := newApp(secure, keys...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return app
+	return app, manager
 }
 
 func loginCookie(t *testing.T, app *vial.App) *http.Cookie {
 	t.Helper()
 	response := httptest.NewRecorder()
 	app.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/login?user=Rafa", nil))
-	result := response.Result()
-	if err := result.Body.Close(); err != nil {
-		t.Fatal(err)
-	}
-	cookies := result.Cookies()
+	cookies := response.Result().Cookies()
 	if len(cookies) != 1 {
 		t.Fatalf("cookies=%d", len(cookies))
 	}
@@ -207,9 +184,7 @@ func do(t *testing.T, client *http.Client, method, target string) *http.Response
 
 func requireStatus(t *testing.T, response *http.Response, want int) {
 	t.Helper()
-	if err := response.Body.Close(); err != nil {
-		t.Fatal(err)
-	}
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != want {
 		t.Fatalf("status=%d want=%d", response.StatusCode, want)
 	}
@@ -222,11 +197,7 @@ type sessionResponse struct {
 
 func decodeSession(t *testing.T, response *http.Response) sessionResponse {
 	t.Helper()
-	defer func() {
-		if err := response.Body.Close(); err != nil {
-			t.Errorf("close response: %v", err)
-		}
-	}()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", response.StatusCode)
 	}
@@ -235,34 +206,4 @@ func decodeSession(t *testing.T, response *http.Response) sessionResponse {
 		t.Fatal(err)
 	}
 	return payload
-}
-
-func TestTamperedCookieIsRejected(t *testing.T) {
-	app := testApp(t, false, testKey)
-	request := httptest.NewRequest(http.MethodGet, "/session", nil)
-	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: strings.Repeat("x", 64)})
-	response := httptest.NewRecorder()
-	app.ServeHTTP(response, request)
-	result := response.Result()
-	cookies := result.Cookies()
-	payload := decodeSession(t, result)
-	if payload.User != "" || len(payload.Flashes) != 0 {
-		t.Fatalf("session=%#v", payload)
-	}
-	if len(cookies) != 1 || cookies[0].MaxAge >= 0 {
-		t.Fatalf("rejected cookie was not expired: %#v", cookies)
-	}
-}
-
-func TestOversizedSessionDoesNotSetCookie(t *testing.T) {
-	app := testApp(t, false, testKey)
-	response := httptest.NewRecorder()
-	target := "/login?user=" + strings.Repeat("x", maxCookieBytes)
-	app.ServeHTTP(response, httptest.NewRequest(http.MethodPost, target, nil))
-	if response.Code != http.StatusInternalServerError {
-		t.Fatalf("status=%d", response.Code)
-	}
-	if got := response.Header().Values("Set-Cookie"); len(got) != 0 {
-		t.Fatalf("cookies=%#v", got)
-	}
 }

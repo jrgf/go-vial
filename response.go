@@ -11,10 +11,12 @@ import (
 // standard-library writer through Unwrap.
 type ResponseWriter struct {
 	http.ResponseWriter
-	capabilities http.ResponseWriter
-	status       int
-	bytes        int64
-	wroteHeader  bool
+	capabilities      http.ResponseWriter
+	status            int
+	bytes             int64
+	wroteHeader       bool
+	committing        bool
+	beforeCommitHooks []func(http.Header)
 }
 
 func newResponseWriter(writer http.ResponseWriter) *ResponseWriter {
@@ -25,12 +27,32 @@ func newResponseWriter(writer http.ResponseWriter) *ResponseWriter {
 
 // WriteHeader records and writes the first response status.
 func (writer *ResponseWriter) WriteHeader(status int) {
-	if writer.wroteHeader {
+	if writer.wroteHeader || writer.committing {
 		return
 	}
+	writer.runBeforeCommitHooks()
 	writer.status = status
 	writer.wroteHeader = true
 	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *ResponseWriter) beforeCommit(hook func(http.Header)) bool {
+	if writer.wroteHeader || writer.committing {
+		return false
+	}
+	writer.beforeCommitHooks = append(writer.beforeCommitHooks, hook)
+	return true
+}
+
+func (writer *ResponseWriter) runBeforeCommitHooks() {
+	writer.committing = true
+	defer func() {
+		writer.committing = false
+		writer.beforeCommitHooks = nil
+	}()
+	for _, hook := range writer.beforeCommitHooks {
+		hook(writer.Header())
+	}
 }
 
 // Write writes response data and records its size.

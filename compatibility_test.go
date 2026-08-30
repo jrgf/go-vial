@@ -40,6 +40,7 @@ import (
 	"github.com/jrgf/go-vial/fault"
 	"github.com/jrgf/go-vial/middleware"
 	"github.com/jrgf/go-vial/render"
+	"github.com/jrgf/go-vial/session"
 	"github.com/jrgf/go-vial/testkit"
 )
 
@@ -53,13 +54,30 @@ func TestApplication(t *testing.T) {
 	}
 
 	renderer := render.New(template.Must(template.New("page").Parse("{{define \"page\"}}hello{{end}}")))
+	sessions, err := session.New(session.Config{
+		Keys: [][]byte{[]byte("0123456789abcdef0123456789abcdef")},
+		DangerouslyAllowInsecureCookies: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	app := vial.New()
-	app.Use(middleware.RequestID(), middleware.Recover())
+	app.Use(sessions.Middleware(), middleware.RequestID(), middleware.Recover())
 	app.Get("/", func(context *vial.Context) error {
 		return renderer.HTML(context, http.StatusOK, "page", nil)
 	}, vial.RouteName("home"))
 	app.Get("/fault", func(*vial.Context) error {
 		return fault.New(fault.InvalidArgument, "invalid", "invalid request")
+	})
+	app.Get("/session", func(context *vial.Context) error {
+		current, err := sessions.From(context)
+		if err != nil {
+			return err
+		}
+		if err := current.Set("external", "works"); err != nil {
+			return err
+		}
+		return context.NoContent(http.StatusNoContent)
 	})
 
 	server := testkit.Start(t, app)
@@ -75,6 +93,11 @@ func TestApplication(t *testing.T) {
 	failure.RequireStatus(http.StatusBadRequest)
 	if got := failure.Fault().Code; got != "invalid" {
 		t.Fatalf("fault code = %q", got)
+	}
+	sessionResponse := server.Do(server.NewRequest(http.MethodGet, "/session", nil))
+	sessionResponse.RequireStatus(http.StatusNoContent)
+	if len(sessionResponse.Cookies()) != 1 {
+		t.Fatal("session cookie was not written")
 	}
 }
 `

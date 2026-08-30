@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add production encrypted cookie sessions with secure defaults, flash values,
+  tamper rejection, size limits, and live key rotation.
+- Add response pre-commit hooks for safe header persistence.
+
 ## 0.18.0
 - gRPC,SSE,Websockets examples
 - Added more CLI commands

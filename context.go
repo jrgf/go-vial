@@ -141,6 +141,18 @@ func (context *Context) Response() http.ResponseWriter {
 	return context.response.capabilities
 }
 
+// BeforeCommit registers a header hook that runs once immediately before the
+// response is committed. Hooks must be registered before any response write.
+func (context *Context) BeforeCommit(hook func(http.Header)) error {
+	if hook == nil {
+		return errors.New("vial: before-commit hook cannot be nil")
+	}
+	if !context.response.beforeCommit(hook) {
+		return errors.New("vial: response already committed")
+	}
+	return nil
+}
+
 // Flush sends buffered response data when the server supports streaming.
 func (context *Context) Flush() error {
 	return context.ResponseController().Flush()

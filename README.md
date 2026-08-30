@@ -8,7 +8,8 @@ tasks, test helpers, and a rebuild loop without replacing Go's HTTP types.
 
 Use Vial when an application needs more structure than raw `net/http` but must
 still work with standard handlers, middleware, contexts, response writers, and
-`httptest`. The runtime uses only the standard library.
+`httptest`. The core HTTP package uses only the standard library; optional
+batteries may use focused dependencies.
 
 ## Capabilities
 
@@ -23,6 +24,7 @@ still work with standard handlers, middleware, contexts, response writers, and
 - Server-Sent Events through standard HTTP streaming primitives
 - WebSocket integration through standard handlers and request cancellation
 - gRPC integration through standard handlers and native HTTP/2 protocols
+- Encrypted cookie sessions with secure defaults, flash values, and key rotation
 - JSON, text, redirects, and empty responses
 - Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
@@ -33,7 +35,7 @@ still work with standard handlers, middleware, contexts, response writers, and
 - `vial dev` automatic build-and-restart loop
 - `vial load` bounded HTTP load checks and CI thresholds
 - Last-known-good process remains online after compilation failures
-- No runtime dependencies outside the Go standard library
+- No runtime dependencies in the core HTTP package
 
 ## Examples
 
@@ -54,12 +56,12 @@ still work with standard handlers, middleware, contexts, response writers, and
 
 ## Project status
 
-Vial is pre-1.0. The API freeze is complete, but the project still needs more
-production evidence and a release-candidate cycle. Vial began as a learning
-project and accepts AI-assisted contributions. Those changes go through the
-same tests, review, security reporting, and compatibility policy as any other
-contribution. Read the release notes before using a pre-1.0 version in
-production.
+Vial is pre-1.0. The core API audit is complete, while the first-party battery
+APIs are still being shaped before the release-candidate freeze. Vial began as
+a learning project and accepts AI-assisted contributions. Those changes go
+through the same tests, review, security reporting, and compatibility policy
+as any other contribution. Read the release notes before using a pre-1.0
+version in production.
 
 ## Run it
 
@@ -261,11 +263,12 @@ VIAL_ALLOW_INSECURE_COOKIE=1 vial dev ./examples/web
 
 The insecure-cookie flag is only for local HTTP.
 
-## Signed cookie sessions
+## Encrypted cookie sessions
 
-Vial leaves session policy opt-in. The isolated
-[`examples/securecookie`](examples/securecookie) module demonstrates signed
-sessions, key rotation, and one-time flash messages with `securecookie`:
+The [`session`](session) package provides authenticated and encrypted
+client-side sessions, one-time flash values, secure cookie defaults, and live
+key rotation. The runnable [`examples/securecookie`](examples/securecookie)
+module demonstrates the complete flow:
 
 ```bash
 umask 077
@@ -275,11 +278,12 @@ SESSION_KEYS_FILE=/tmp/vial-session-keys VIAL_ALLOW_INSECURE_COOKIE=1 vial dev .
 
 The example reloads this file every minute and expires sessions after five
 minutes. Rotate with `NEW_KEY,OLD_KEY`, newest first; remove the old key after
-five minutes.
+the longest configured session lifetime.
 
-`VIAL_ALLOW_INSECURE_COOKIE=1` is only for local HTTP. Cookie contents are
-authenticated but not encrypted, so never store secrets in them. `SameSite`
-is defense in depth, not a replacement for CSRF protection.
+`VIAL_ALLOW_INSECURE_COOKIE=1` is only for local HTTP. Sessions are encrypted
+but remain client-side and limited to one cookie. `SameSite` is defense in
+depth, not a replacement for CSRF protection. See
+[`docs/sessions.md`](docs/sessions.md) for the API and deployment rules.
 
 ## Testing
 
