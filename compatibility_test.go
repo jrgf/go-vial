@@ -43,12 +43,16 @@ import (
 	"github.com/jrgf/go-vial/middleware"
 	"github.com/jrgf/go-vial/render"
 	"github.com/jrgf/go-vial/session"
+	"github.com/jrgf/go-vial/sqlkit"
 	"github.com/jrgf/go-vial/testkit"
 )
 
 func TestApplication(t *testing.T) {
 	_ = async.NewMemoryExecutor
 	_ = asyncpostgres.New
+	_ = sqlkit.InTx
+	_ = sqlkit.NewMigrator
+	_ = (*sqlkit.Migrator).Migrate
 
 	var settings struct{ HTTP config.HTTP }
 	if err := config.Load(&settings, config.Environ(nil)); err != nil {

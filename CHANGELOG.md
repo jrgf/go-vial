@@ -11,6 +11,8 @@
   in-process rate limiting.
 - Add route-bounded HTTP OpenMetrics, standard `net/http` tracing middleware
   integration, final-response hooks, and request/log trace correlation.
+- Add `database/sql` transaction and embedded forward-migration helpers with a
+  PostgreSQL lifecycle and readiness example.
 
 ## 0.18.0
 - gRPC,SSE,Websockets examples

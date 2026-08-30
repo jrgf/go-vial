@@ -28,6 +28,7 @@ batteries may use focused dependencies.
 - Provider-neutral request identities and authentication/grant guards
 - Restrictive browser security headers and bounded local rate limiting
 - Route-bounded OpenMetrics, native HTTP tracing integration, and correlated IDs
+- `database/sql` transactions, readiness wiring, and embedded forward migrations
 - JSON, text, redirects, and empty responses
 - Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
@@ -56,7 +57,9 @@ batteries may use focused dependencies.
    demonstrates standard interceptors, TLS, streaming, and graceful shutdown.
 6. [`examples/observability`](examples/observability) exposes HTTP metrics and
    correlates request and W3C trace IDs in structured logs.
-7. [vial-gateway](https://github.com/jrgf/vial-gateway) and
+7. [`examples/database`](examples/database) wires PostgreSQL lifecycle,
+   readiness, transactions, and embedded migrations.
+8. [vial-gateway](https://github.com/jrgf/vial-gateway) and
    [vialboard](https://github.com/jrgf/vialboard) are complete applications.
 
 ## Project status
@@ -324,6 +327,22 @@ and structured logs alongside `X-Request-ID`.
 The runnable [`examples/observability`](examples/observability) application
 exposes `/metrics`. See [`docs/observability.md`](docs/observability.md) for
 tracer integration, metric names, middleware order, and deployment guidance.
+
+## Database
+
+The [`sqlkit`](sqlkit) package adds transaction and embedded migration helpers
+to `database/sql`. Existing application hooks own the pool lifecycle:
+
+```go
+app.OnStart(db.PingContext, migrator.Migrate)
+app.OnStop(func(context.Context) error { return db.Close() })
+app.Readiness("/ready", db.PingContext)
+```
+
+`sqlkit.InTx` commits on success and rolls back on errors or panics. `Migrator`
+applies sorted `.sql` files once, stores SHA-256 checksums, and rejects edited
+history. See [`docs/database.md`](docs/database.md) and the runnable
+[`examples/database`](examples/database) PostgreSQL application.
 
 ## Testing
 
@@ -709,6 +728,7 @@ Builds never run concurrently. Changes detected during a build remain queued for
 ├── server.go              # server lifecycle and graceful shutdown
 ├── auth/                  # request identities and authorization guards
 ├── session/               # encrypted client-side cookie sessions
+├── sqlkit/                # database/sql transactions and migrations
 ├── middleware/            # request ID, logging, recovery, browser policy, and rate limits
 ├── internal/dev/          # watcher, builder, runner, and process control
 ├── cmd/vial/              # development and load-check CLI
