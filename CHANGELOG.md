@@ -7,6 +7,8 @@
 - Add response pre-commit hooks for safe header persistence.
 - Add provider-neutral request identities, challenged authentication guards,
   and application-defined grant checks.
+- Add restrictive browser security headers and bounded, trusted-proxy-aware
+  in-process rate limiting.
 
 ## 0.18.0
 - gRPC,SSE,Websockets examples

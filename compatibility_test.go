@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jrgf/go-vial"
 	"github.com/jrgf/go-vial/async"
@@ -76,8 +77,15 @@ func TestApplication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	limit, err := middleware.RateLimit(middleware.RateLimitConfig{
+		Requests: 100,
+		Window:   time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	app := vial.New()
-	app.Use(sessions.Middleware(), identities.Middleware(), middleware.RequestID(), middleware.Recover())
+	app.Use(middleware.SecurityHeaders(), limit, sessions.Middleware(), identities.Middleware(), middleware.RequestID(), middleware.Recover())
 	app.Get("/", func(context *vial.Context) error {
 		return renderer.HTML(context, http.StatusOK, "page", nil)
 	}, vial.RouteName("home"))
@@ -102,6 +110,9 @@ func TestApplication(t *testing.T) {
 	server := testkit.Start(t, app)
 	response := server.Do(server.NewRequest(http.MethodGet, "/", nil))
 	response.RequireStatus(http.StatusOK)
+	if response.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("security headers are missing")
+	}
 	if !strings.Contains(response.Text(), "hello") {
 		t.Fatal("rendered response is missing content")
 	}

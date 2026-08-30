@@ -26,6 +26,7 @@ batteries may use focused dependencies.
 - gRPC integration through standard handlers and native HTTP/2 protocols
 - Encrypted cookie sessions with secure defaults, flash values, and key rotation
 - Provider-neutral request identities and authentication/grant guards
+- Restrictive browser security headers and bounded local rate limiting
 - JSON, text, redirects, and empty responses
 - Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
@@ -43,7 +44,7 @@ batteries may use focused dependencies.
 1. [`examples/hello`](examples/hello) is the smallest runnable app and
    introduces the development loop.
 2. [`examples/json-api`](examples/json-api) demonstrates JSON binding and
-   errors. The module, task, upload, SSE, config, secure-cookie, CSRF,
+   errors. The module, task, upload, SSE, config, secure-cookie, security, CSRF,
    and template examples each cover one concern.
 3. [`examples/async`](examples/async) demonstrates
    submission, `Prefer: wait`, polling, cancellation, ownership, idempotency,
@@ -296,6 +297,18 @@ session-backed identity resolution with protected `/me` and `/admin` routes.
 
 See [`docs/authentication.md`](docs/authentication.md) for middleware ordering,
 401/403 behavior, and integration guidance.
+
+## Security middleware
+
+`middleware.SecurityHeaders()` adds a restrictive Content Security Policy,
+referrer and framing controls, MIME sniffing protection, and HSTS on direct TLS
+requests. `middleware.RateLimit(...)` provides bounded in-process token buckets
+keyed by `Context.ClientIP()` by default. The runnable
+[`examples/security`](examples/security) application demonstrates both.
+
+Use a gateway or shared store when a limit must span replicas. See
+[`docs/security.md`](docs/security.md) for proxy, HSTS, key-capacity, and CSP
+guidance.
 
 ## Testing
 
@@ -681,7 +694,7 @@ Builds never run concurrently. Changes detected during a build remain queued for
 ├── server.go              # server lifecycle and graceful shutdown
 ├── auth/                  # request identities and authorization guards
 ├── session/               # encrypted client-side cookie sessions
-├── middleware/            # request ID, logging, recovery, CORS, and CSRF
+├── middleware/            # request ID, logging, recovery, browser policy, and rate limits
 ├── internal/dev/          # watcher, builder, runner, and process control
 ├── cmd/vial/              # development and load-check CLI
 └── examples/              # runnable applications
