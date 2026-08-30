@@ -13,6 +13,8 @@
   integration, final-response hooks, and request/log trace correlation.
 - Add `database/sql` transaction and embedded forward-migration helpers with a
   PostgreSQL lifecycle and readiness example.
+- Add deterministic OpenAPI 3.1 generation, request and response schemas,
+  security metadata, and a cached JSON document endpoint.
 
 ## 0.18.0
 - gRPC,SSE,Websockets examples

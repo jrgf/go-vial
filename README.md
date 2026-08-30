@@ -29,6 +29,7 @@ batteries may use focused dependencies.
 - Restrictive browser security headers and bounded local rate limiting
 - Route-bounded OpenMetrics, native HTTP tracing integration, and correlated IDs
 - `database/sql` transactions, readiness wiring, and embedded forward migrations
+- OpenAPI 3.1 generation from routes and Go request and response types
 - JSON, text, redirects, and empty responses
 - Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
@@ -59,7 +60,9 @@ batteries may use focused dependencies.
    correlates request and W3C trace IDs in structured logs.
 7. [`examples/database`](examples/database) wires PostgreSQL lifecycle,
    readiness, transactions, and embedded migrations.
-8. [vial-gateway](https://github.com/jrgf/vial-gateway) and
+8. [`examples/openapi`](examples/openapi) generates and serves an OpenAPI 3.1
+   document from named routes and Go types.
+9. [vial-gateway](https://github.com/jrgf/vial-gateway) and
    [vialboard](https://github.com/jrgf/vialboard) are complete applications.
 
 ## Project status
@@ -343,6 +346,31 @@ app.Readiness("/ready", db.PingContext)
 applies sorted `.sql` files once, stores SHA-256 checksums, and rejects edited
 history. See [`docs/database.md`](docs/database.md) and the runnable
 [`examples/database`](examples/database) PostgreSQL application.
+
+## OpenAPI 3.1
+
+The [`openapi`](openapi) package generates deterministic OpenAPI 3.1 JSON from
+`App.Routes`, `RouteName`, and Go request and response types. It understands
+Vial's `path`, `query`, `header`, `cookie`, `form`, and `json` binding tags.
+
+```go
+err := openapi.Mount(app, "/openapi.json", openapi.Config{
+    Title:   "Notes API",
+    Version: "1.0.0",
+    Operations: map[string]openapi.Operation{
+        "notes.create": {
+            Request: createNoteRequest{},
+            Responses: map[int]openapi.Response{
+                http.StatusCreated: {Body: note{}},
+            },
+        },
+    },
+})
+```
+
+`openapi:"required"` marks documented fields as required; application
+validation remains authoritative. See [`docs/openapi.md`](docs/openapi.md) and
+the runnable [`examples/openapi`](examples/openapi) application.
 
 ## Testing
 
@@ -729,6 +757,7 @@ Builds never run concurrently. Changes detected during a build remain queued for
 ├── auth/                  # request identities and authorization guards
 ├── session/               # encrypted client-side cookie sessions
 ├── sqlkit/                # database/sql transactions and migrations
+├── openapi/               # OpenAPI 3.1 generation and document handler
 ├── middleware/            # request ID, logging, recovery, browser policy, and rate limits
 ├── internal/dev/          # watcher, builder, runner, and process control
 ├── cmd/vial/              # development and load-check CLI

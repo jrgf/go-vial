@@ -41,6 +41,7 @@ import (
 	"github.com/jrgf/go-vial/contrib/asyncpostgres"
 	"github.com/jrgf/go-vial/fault"
 	"github.com/jrgf/go-vial/middleware"
+	"github.com/jrgf/go-vial/openapi"
 	"github.com/jrgf/go-vial/render"
 	"github.com/jrgf/go-vial/session"
 	"github.com/jrgf/go-vial/sqlkit"
@@ -50,6 +51,14 @@ import (
 func TestApplication(t *testing.T) {
 	_ = async.NewMemoryExecutor
 	_ = asyncpostgres.New
+	_ = openapi.Generate
+	_ = openapi.Handler
+	_ = openapi.Mount
+	_ = openapi.Config{}
+	_ = openapi.Operation{}
+	_ = openapi.Response{}
+	_ = openapi.SecurityRequirement{}
+	_ = openapi.SecurityScheme{}
 	_ = sqlkit.InTx
 	_ = sqlkit.NewMigrator
 	_ = (*sqlkit.Migrator).Migrate
