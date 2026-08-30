@@ -57,6 +57,37 @@ func TestSessionAndFlashRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSessionAuthenticationGuards(t *testing.T) {
+	app, _ := testApp(t, false, testKey)
+	server := httptest.NewServer(app)
+	t.Cleanup(server.Close)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := server.Client()
+	client.Jar = jar
+
+	response := do(t, client, http.MethodGet, server.URL+"/me")
+	if response.StatusCode != http.StatusUnauthorized || response.Header.Get("WWW-Authenticate") != `Session realm="vial-example"` {
+		t.Fatalf("anonymous response: status=%d challenge=%q", response.StatusCode, response.Header.Get("WWW-Authenticate"))
+	}
+	_ = response.Body.Close()
+	requireStatus(t, do(t, client, http.MethodPost, server.URL+"/login?user=Rafa"), http.StatusNoContent)
+	response = do(t, client, http.MethodGet, server.URL+"/me")
+	var current map[string]string
+	if err := json.NewDecoder(response.Body).Decode(&current); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK || current["subject"] != "Rafa" {
+		t.Fatalf("identity response: status=%d body=%#v", response.StatusCode, current)
+	}
+	requireStatus(t, do(t, client, http.MethodGet, server.URL+"/admin"), http.StatusForbidden)
+	requireStatus(t, do(t, client, http.MethodPost, server.URL+"/login?user=Admin"), http.StatusNoContent)
+	requireStatus(t, do(t, client, http.MethodGet, server.URL+"/admin"), http.StatusNoContent)
+}
+
 func TestCookiePolicyAndTamperRejection(t *testing.T) {
 	secureApp, _ := testApp(t, true, testKey)
 	response := httptest.NewRecorder()

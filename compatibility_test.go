@@ -35,6 +35,7 @@ import (
 
 	"github.com/jrgf/go-vial"
 	"github.com/jrgf/go-vial/async"
+	"github.com/jrgf/go-vial/auth"
 	"github.com/jrgf/go-vial/config"
 	"github.com/jrgf/go-vial/contrib/asyncpostgres"
 	"github.com/jrgf/go-vial/fault"
@@ -61,8 +62,22 @@ func TestApplication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	identities, err := auth.New(auth.Config{
+		Challenge: "Session",
+		Authenticate: func(context *vial.Context) (auth.Identity, bool, error) {
+			current, err := sessions.From(context)
+			if err != nil {
+				return auth.Identity{}, false, err
+			}
+			subject, ok := current.Get("external")
+			return auth.Identity{Subject: subject}, ok, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	app := vial.New()
-	app.Use(sessions.Middleware(), middleware.RequestID(), middleware.Recover())
+	app.Use(sessions.Middleware(), identities.Middleware(), middleware.RequestID(), middleware.Recover())
 	app.Get("/", func(context *vial.Context) error {
 		return renderer.HTML(context, http.StatusOK, "page", nil)
 	}, vial.RouteName("home"))
@@ -79,6 +94,10 @@ func TestApplication(t *testing.T) {
 		}
 		return context.NoContent(http.StatusNoContent)
 	})
+	app.Get("/authenticated", func(context *vial.Context) error {
+		identity, _ := identities.From(context)
+		return context.JSON(http.StatusOK, identity)
+	}, vial.RouteMiddleware(identities.Require()))
 
 	server := testkit.Start(t, app)
 	response := server.Do(server.NewRequest(http.MethodGet, "/", nil))
@@ -99,6 +118,8 @@ func TestApplication(t *testing.T) {
 	if len(sessionResponse.Cookies()) != 1 {
 		t.Fatal("session cookie was not written")
 	}
+	authenticated := server.Do(server.NewRequest(http.MethodGet, "/authenticated", nil))
+	authenticated.RequireStatus(http.StatusOK)
 }
 `
 

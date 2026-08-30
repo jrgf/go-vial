@@ -25,6 +25,7 @@ batteries may use focused dependencies.
 - WebSocket integration through standard handlers and request cancellation
 - gRPC integration through standard handlers and native HTTP/2 protocols
 - Encrypted cookie sessions with secure defaults, flash values, and key rotation
+- Provider-neutral request identities and authentication/grant guards
 - JSON, text, redirects, and empty responses
 - Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
@@ -284,6 +285,17 @@ the longest configured session lifetime.
 but remain client-side and limited to one cookie. `SameSite` is defense in
 depth, not a replacement for CSRF protection. See
 [`docs/sessions.md`](docs/sessions.md) for the API and deployment rules.
+
+## Authentication and authorization
+
+The [`auth`](auth) package resolves an optional identity once per request and
+provides route guards for authentication and application-defined grants. It
+does not own users, passwords, tokens, or an authorization database. The
+[`examples/securecookie`](examples/securecookie) application demonstrates
+session-backed identity resolution with protected `/me` and `/admin` routes.
+
+See [`docs/authentication.md`](docs/authentication.md) for middleware ordering,
+401/403 behavior, and integration guidance.
 
 ## Testing
 
@@ -667,6 +679,8 @@ Builds never run concurrently. Changes detected during a build remain queued for
 ├── binding.go             # query, form, multipart, and JSON body limits
 ├── errors.go              # HTTP error model and renderer
 ├── server.go              # server lifecycle and graceful shutdown
+├── auth/                  # request identities and authorization guards
+├── session/               # encrypted client-side cookie sessions
 ├── middleware/            # request ID, logging, recovery, CORS, and CSRF
 ├── internal/dev/          # watcher, builder, runner, and process control
 ├── cmd/vial/              # development and load-check CLI

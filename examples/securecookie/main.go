@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jrgf/go-vial"
+	"github.com/jrgf/go-vial/auth"
 	"github.com/jrgf/go-vial/session"
 )
 
@@ -57,9 +58,30 @@ func newApp(secure bool, keys ...[]byte) (*vial.App, *session.Manager, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	identities, err := auth.New(auth.Config{
+		Challenge: `Session realm="vial-example"`,
+		Authenticate: func(context *vial.Context) (auth.Identity, bool, error) {
+			current, err := sessions.From(context)
+			if err != nil {
+				return auth.Identity{}, false, err
+			}
+			user, ok := current.Get("user")
+			if !ok {
+				return auth.Identity{}, false, nil
+			}
+			identity := auth.Identity{Subject: user, Grants: []string{"profile:read"}}
+			if user == "Admin" {
+				identity.Grants = append(identity.Grants, "admin")
+			}
+			return identity, true, nil
+		},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
 
 	app := vial.New()
-	app.Use(sessions.Middleware())
+	app.Use(sessions.Middleware(), identities.Middleware())
 	app.Post("/login", func(context *vial.Context) error {
 		user := strings.TrimSpace(context.Query("user"))
 		if user == "" {
@@ -102,6 +124,13 @@ func newApp(secure bool, keys ...[]byte) (*vial.App, *session.Manager, error) {
 		}
 		return context.NoContent(http.StatusNoContent)
 	})
+	app.Get("/me", func(context *vial.Context) error {
+		identity, _ := identities.From(context)
+		return context.JSON(http.StatusOK, map[string]string{"subject": identity.Subject})
+	}, vial.RouteMiddleware(identities.Require()))
+	app.Get("/admin", func(context *vial.Context) error {
+		return context.NoContent(http.StatusNoContent)
+	}, vial.RouteMiddleware(identities.Require("admin")))
 	return app, sessions, nil
 }
 

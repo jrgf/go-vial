@@ -5,6 +5,8 @@
 - Add production encrypted cookie sessions with secure defaults, flash values,
   tamper rejection, size limits, and live key rotation.
 - Add response pre-commit hooks for safe header persistence.
+- Add provider-neutral request identities, challenged authentication guards,
+  and application-defined grant checks.
 
 ## 0.18.0
 - gRPC,SSE,Websockets examples
