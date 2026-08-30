@@ -618,6 +618,22 @@ vial load --workers 2000 --duration 30s --timeout 5s http://localhost:8080/
 vial load --max-error-rate 1 --max-p95 250ms http://localhost:8080/
 ```
 
+### CLI contract
+
+- `vial`, `help`, `--help`, `-h`, and subcommand help exit with status 0.
+- Unknown commands, invalid arguments, runtime failures, and failed load
+  thresholds exit with status 1.
+- `vial routes --json` writes an indented JSON array of `vial.Route` values to
+  standard output.
+- `vial version --verbose` writes stable `version=`, `commit=`, and `go=` lines
+  to standard output.
+- `vial load` writes its final summary to standard output and progress to
+  standard error, keeping redirected summaries clean.
+
+Human-readable help, tables, progress text, and error wording may improve within
+1.x. Exit behavior and the machine-readable formats above are compatibility
+contracts.
+
 ### Replacement sequence
 
 ```text

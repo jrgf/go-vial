@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -20,7 +21,7 @@ import (
 )
 
 var (
-	version              = "0.17.1"
+	version              = "0.18.0"
 	commit               = "development"
 	buildGoVersion       string
 	loadProgressInterval = time.Second
@@ -40,10 +41,17 @@ func (values *stringList) Set(value string) error {
 }
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "vial:", err)
-		os.Exit(1)
+	if code := commandExitCode(run(os.Args[1:]), os.Stderr); code != 0 {
+		os.Exit(code)
 	}
+}
+
+func commandExitCode(err error, output io.Writer) int {
+	if err == nil || errors.Is(err, flag.ErrHelp) {
+		return 0
+	}
+	_, _ = fmt.Fprintln(output, "vial:", err)
+	return 1
 }
 
 func run(arguments []string) error {
@@ -62,7 +70,7 @@ func run(arguments []string) error {
 	case "load":
 		return runLoad(arguments[1:], os.Stdout, os.Stderr)
 	case "version", "--version", "-v":
-		return printVersion(arguments[1:])
+		return printVersion(arguments[1:], os.Stdout)
 	case "help", "--help", "-h":
 		printUsage()
 		return nil
@@ -71,10 +79,14 @@ func run(arguments []string) error {
 	}
 }
 
-func printVersion(arguments []string) error {
+func printVersion(arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		fmt.Println(version)
-		return nil
+		_, err := fmt.Fprintln(output, version)
+		return err
+	}
+	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
+		_, err := fmt.Fprintln(output, "Usage: vial version [--verbose]")
+		return err
 	}
 	if len(arguments) != 1 || arguments[0] != "--verbose" {
 		return fmt.Errorf("usage: vial version [--verbose]")
@@ -83,8 +95,8 @@ func printVersion(arguments []string) error {
 	if goVersion == "" {
 		goVersion = runtime.Version()
 	}
-	fmt.Printf("version=%s\ncommit=%s\ngo=%s\n", version, commit, goVersion)
-	return nil
+	_, err := fmt.Fprintf(output, "version=%s\ncommit=%s\ngo=%s\n", version, commit, goVersion)
+	return err
 }
 
 func runLoad(arguments []string, output, progressOutput io.Writer) error {

@@ -34,7 +34,9 @@ import (
 	"testing"
 
 	"github.com/jrgf/go-vial"
+	"github.com/jrgf/go-vial/async"
 	"github.com/jrgf/go-vial/config"
+	"github.com/jrgf/go-vial/contrib/asyncpostgres"
 	"github.com/jrgf/go-vial/fault"
 	"github.com/jrgf/go-vial/middleware"
 	"github.com/jrgf/go-vial/render"
@@ -42,6 +44,9 @@ import (
 )
 
 func TestApplication(t *testing.T) {
+	_ = async.NewMemoryExecutor
+	_ = asyncpostgres.New
+
 	var settings struct{ HTTP config.HTTP }
 	if err := config.Load(&settings, config.Environ(nil)); err != nil {
 		t.Fatal(err)

@@ -53,7 +53,7 @@ func TestStringList(t *testing.T) {
 }
 
 func TestRunCommands(t *testing.T) {
-	for _, arguments := range [][]string{nil, {"help"}, {"version"}, {"version", "--verbose"}} {
+	for _, arguments := range [][]string{nil, {"help"}, {"version"}, {"version", "--verbose"}, {"version", "--help"}, {"--version"}, {"-v"}} {
 		if err := run(arguments); err != nil {
 			t.Errorf("run(%q): %v", arguments, err)
 		}
@@ -63,6 +63,51 @@ func TestRunCommands(t *testing.T) {
 	}
 	if err := run([]string{"version", "--unknown"}); err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Fatalf("invalid version arguments returned %v", err)
+	}
+}
+
+func TestCommandExitCodes(t *testing.T) {
+	var output bytes.Buffer
+	for _, err := range []error{nil, flag.ErrHelp} {
+		if code := commandExitCode(err, &output); code != 0 {
+			t.Fatalf("exit code=%d for %v", code, err)
+		}
+	}
+	if output.Len() != 0 {
+		t.Fatalf("successful command wrote error output %q", output.String())
+	}
+
+	err := errors.New("failed")
+	if code := commandExitCode(err, &output); code != 1 {
+		t.Fatalf("failure exit code=%d", code)
+	}
+	if got := output.String(); got != "vial: failed\n" {
+		t.Fatalf("failure output=%q", got)
+	}
+}
+
+func TestVersionOutput(t *testing.T) {
+	originalVersion, originalCommit, originalGoVersion := version, commit, buildGoVersion
+	t.Cleanup(func() {
+		version, commit, buildGoVersion = originalVersion, originalCommit, originalGoVersion
+	})
+	version, commit, buildGoVersion = "1.0.0", "abc123", "go1.26.6"
+
+	for _, test := range []struct {
+		arguments []string
+		want      string
+	}{
+		{want: "1.0.0\n"},
+		{arguments: []string{"--verbose"}, want: "version=1.0.0\ncommit=abc123\ngo=go1.26.6\n"},
+		{arguments: []string{"--help"}, want: "Usage: vial version [--verbose]\n"},
+	} {
+		var output bytes.Buffer
+		if err := printVersion(test.arguments, &output); err != nil {
+			t.Fatal(err)
+		}
+		if got := output.String(); got != test.want {
+			t.Fatalf("version output=%q, want %q", got, test.want)
+		}
 	}
 }
 
@@ -193,6 +238,9 @@ func main() { _ = os.Remove(os.Getenv("VIAL_ROUTES_OUTPUT")) }`, "read inspectio
 }
 
 func TestCommandOutputErrors(t *testing.T) {
+	if err := printVersion(nil, commandErrorWriter{}); err == nil {
+		t.Fatal("expected version write error")
+	}
 	if err := runDoctor([]string{"../../examples/config"}, commandErrorWriter{}); err == nil || !strings.Contains(err.Error(), "write doctor") {
 		t.Fatalf("doctor write error = %v", err)
 	}
