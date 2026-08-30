@@ -633,6 +633,61 @@ func TestServeStopsWhenContextIsCanceled(t *testing.T) {
 	}
 }
 
+func TestServeCancelsActiveRequestsWhenContextIsCanceled(t *testing.T) {
+	app := vial.New(vial.WithShutdownTimeout(time.Second))
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	app.Get("/", func(contextValue *vial.Context) error {
+		close(started)
+		<-contextValue.Request().Context().Done()
+		close(stopped)
+		return nil
+	})
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	serveContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- app.Serve(serveContext, listener) }()
+
+	requestDone := make(chan struct{})
+	go func() {
+		response, requestErr := http.Get("http://" + listener.Addr().String() + "/")
+		if requestErr == nil {
+			_ = response.Body.Close()
+		}
+		close(requestDone)
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request did not start")
+	}
+
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("active request context was not canceled")
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("serve returned an error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not stop")
+	}
+	select {
+	case <-requestDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request did not finish")
+	}
+}
+
 func TestMultipleRoutesKeepTheirOwnHandlers(t *testing.T) {
 	app := vial.New()
 	app.Get("/one", func(context *vial.Context) error {

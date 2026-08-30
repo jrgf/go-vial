@@ -38,6 +38,7 @@ type config struct {
 	trustedProxies            []netip.Prefix
 	baseContext               func(net.Listener) context.Context
 	connContext               func(context.Context, net.Conn) context.Context
+	protocols                 *http.Protocols
 	serverErrorLog            *log.Logger
 	healthCheckTimeout        time.Duration
 }
@@ -146,6 +147,17 @@ func WithConnContext(connContext func(context.Context, net.Conn) context.Context
 			return
 		}
 		cfg.connContext = connContext
+	}
+}
+
+// WithHTTPProtocols sets http.Server.Protocols.
+func WithHTTPProtocols(protocols *http.Protocols) Option {
+	return func(cfg *config) {
+		if protocols == nil {
+			cfg.invalidOption("WithHTTPProtocols", "protocols cannot be nil")
+			return
+		}
+		cfg.protocols = protocols
 	}
 }
 

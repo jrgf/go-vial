@@ -69,6 +69,10 @@ func (app *App) Serve(contextValue context.Context, listener net.Listener) (serv
 
 	runContext, stopSignals := signal.NotifyContext(contextValue, shutdownSignals()...)
 	defer stopSignals()
+	baseContext := app.config.baseContext
+	if baseContext == nil {
+		baseContext = func(net.Listener) context.Context { return runContext }
+	}
 
 	component := &httpComponent{
 		listener: listener,
@@ -79,8 +83,9 @@ func (app *App) Serve(contextValue context.Context, listener net.Listener) (serv
 			WriteTimeout:      app.config.writeTimeout,
 			IdleTimeout:       app.config.idleTimeout,
 			MaxHeaderBytes:    app.config.maxHeaderBytes,
-			BaseContext:       app.config.baseContext,
+			BaseContext:       baseContext,
 			ConnContext:       app.config.connContext,
+			Protocols:         app.config.protocols,
 			ErrorLog:          app.config.serverErrorLog,
 		},
 		done:   make(chan error, 1),

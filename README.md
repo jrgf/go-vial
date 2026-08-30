@@ -20,6 +20,9 @@ still work with standard handlers, middleware, contexts, response writers, and
 - Collision-safe typed context values and trusted-proxy client IPs
 - Supervised startup, shutdown, background tasks, liveness, and readiness
 - RFC 7240 asynchronous operations with polling and cancellation
+- Server-Sent Events through standard HTTP streaming primitives
+- WebSocket integration through standard handlers and request cancellation
+- gRPC integration through standard handlers and native HTTP/2 protocols
 - JSON, text, redirects, and empty responses
 - Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
@@ -37,12 +40,16 @@ still work with standard handlers, middleware, contexts, response writers, and
 1. [`examples/hello`](examples/hello) is the smallest runnable app and
    introduces the development loop.
 2. [`examples/json-api`](examples/json-api) demonstrates JSON binding and
-   errors. The module, task, upload, event-stream, config, secure-cookie, CSRF,
+   errors. The module, task, upload, SSE, config, secure-cookie, CSRF,
    and template examples each cover one concern.
 3. [`examples/async`](examples/async) demonstrates
    submission, `Prefer: wait`, polling, cancellation, ownership, idempotency,
    readiness, and metrics with the bounded in-memory executor.
-4. [vial-gateway](https://github.com/jrgf/vial-gateway) and
+4. [`examples/websocket`](examples/websocket) uses `coder/websocket` through a
+   standard handler with Vial middleware, limits, and graceful shutdown.
+5. [`examples/grpc`](examples/grpc) shares one h2c listener with HTTP routes and
+   demonstrates standard interceptors, TLS, streaming, and graceful shutdown.
+6. [vial-gateway](https://github.com/jrgf/vial-gateway) and
    [vialboard](https://github.com/jrgf/vialboard) are complete applications.
 
 ## Project status

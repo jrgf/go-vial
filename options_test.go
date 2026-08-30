@@ -6,6 +6,7 @@ import (
 	"log"
 	"log/slog"
 	"net"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,8 @@ import (
 func TestOptions(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	serverErrorLog := log.New(io.Discard, "", 0)
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
 	config := defaultConfig()
 	options := []Option{
 		WithLogger(logger),
@@ -27,6 +30,7 @@ func TestOptions(t *testing.T) {
 		WithShutdownTimeout(5 * time.Second),
 		WithBaseContext(func(net.Listener) context.Context { return context.Background() }),
 		WithConnContext(func(contextValue context.Context, _ net.Conn) context.Context { return contextValue }),
+		WithHTTPProtocols(protocols),
 		WithServerErrorLog(serverErrorLog),
 		WithHealthCheckTimeout(6 * time.Second),
 	}
@@ -40,7 +44,7 @@ func TestOptions(t *testing.T) {
 	if config.readHeaderTimeout != time.Second || config.readTimeout != 2*time.Second || config.writeTimeout != 3*time.Second || config.idleTimeout != 4*time.Second || config.shutdownTimeout != 5*time.Second {
 		t.Fatal("timeout options were not applied")
 	}
-	if config.baseContext == nil || config.connContext == nil || config.serverErrorLog != serverErrorLog || config.healthCheckTimeout != 6*time.Second {
+	if config.baseContext == nil || config.connContext == nil || config.protocols != protocols || config.serverErrorLog != serverErrorLog || config.healthCheckTimeout != 6*time.Second {
 		t.Fatal("http.Server options were not applied")
 	}
 
@@ -54,12 +58,13 @@ func TestOptions(t *testing.T) {
 	WithShutdownTimeout(0)(&config)
 	WithBaseContext(nil)(&config)
 	WithConnContext(nil)(&config)
+	WithHTTPProtocols(nil)(&config)
 	WithServerErrorLog(nil)(&config)
 	WithHealthCheckTimeout(0)(&config)
 	if config.logger != logger || config.maxBodySize != 1024 || config.readHeaderTimeout != time.Second || config.readTimeout != 2*time.Second || config.writeTimeout != 3*time.Second || config.idleTimeout != 4*time.Second || config.shutdownTimeout != 5*time.Second {
 		t.Fatal("invalid options changed the configuration")
 	}
-	if len(config.optionErrors) != 12 {
+	if len(config.optionErrors) != 13 {
 		t.Fatalf("invalid options were not collected: %v", config.optionErrors)
 	}
 }
@@ -77,6 +82,7 @@ func TestBuildReportsAllInvalidOptions(t *testing.T) {
 		WithShutdownTimeout(0),
 		WithBaseContext(nil),
 		WithConnContext(nil),
+		WithHTTPProtocols(nil),
 		WithServerErrorLog(nil),
 		WithHealthCheckTimeout(0),
 		WithReadHeaderTimeout(2*time.Second),
@@ -91,7 +97,7 @@ func TestBuildReportsAllInvalidOptions(t *testing.T) {
 		"Option", "WithLogger", "WithMaxBodySize", "WithMaxHeaderBytes",
 		"WithReadHeaderTimeout", "WithReadTimeout", "WithWriteTimeout",
 		"WithIdleTimeout", "WithShutdownTimeout",
-		"WithBaseContext", "WithConnContext", "WithServerErrorLog",
+		"WithBaseContext", "WithConnContext", "WithHTTPProtocols", "WithServerErrorLog",
 		"WithHealthCheckTimeout",
 	} {
 		if !strings.Contains(message, name) {
