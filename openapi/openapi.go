@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"mime"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -469,9 +471,7 @@ func schemaFor(valueType reflect.Type, visiting map[reflect.Type]bool) (map[stri
 		return map[string]any{"type": "integer", "format": "int32"}, nil
 	case reflect.Int64:
 		return map[string]any{"type": "integer", "format": "int64"}, nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32:
-		return map[string]any{"type": "integer", "minimum": 0}, nil
-	case reflect.Uint64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return map[string]any{"type": "integer", "minimum": 0}, nil
 	case reflect.Float32:
 		return map[string]any{"type": "number", "format": "float"}, nil
@@ -673,15 +673,12 @@ func securitySchemeDocument(scheme SecurityScheme) map[string]any {
 func cloneConfig(config Config) Config {
 	clone := config
 	clone.Security = cloneRequirements(config.Security)
-	clone.SecuritySchemes = make(map[string]SecurityScheme, len(config.SecuritySchemes))
-	for name, scheme := range config.SecuritySchemes {
-		clone.SecuritySchemes[name] = scheme
-	}
+	clone.SecuritySchemes = maps.Clone(config.SecuritySchemes)
 	clone.Operations = make(map[string]Operation, len(config.Operations))
 	for name, operation := range config.Operations {
-		operation.Tags = append([]string(nil), operation.Tags...)
+		operation.Tags = slices.Clone(operation.Tags)
 		operation.Security = cloneRequirements(operation.Security)
-		operation.Responses = cloneResponses(operation.Responses)
+		operation.Responses = maps.Clone(operation.Responses)
 		clone.Operations[name] = operation
 	}
 	return clone
@@ -695,19 +692,8 @@ func cloneRequirements(requirements []SecurityRequirement) []SecurityRequirement
 	for index, requirement := range requirements {
 		clone[index] = make(SecurityRequirement, len(requirement))
 		for name, scopes := range requirement {
-			clone[index][name] = append(make([]string, 0, len(scopes)), scopes...)
+			clone[index][name] = slices.Clone(scopes)
 		}
-	}
-	return clone
-}
-
-func cloneResponses(responses map[int]Response) map[int]Response {
-	if responses == nil {
-		return nil
-	}
-	clone := make(map[int]Response, len(responses))
-	for status, response := range responses {
-		clone[status] = response
 	}
 	return clone
 }

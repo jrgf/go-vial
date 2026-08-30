@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,10 @@ import (
 
 	"github.com/jrgf/go-vial/sse"
 )
+
+type writerFunc func([]byte) (int, error)
+
+func (write writerFunc) Write(data []byte) (int, error) { return write(data) }
 
 func TestEventEncoding(t *testing.T) {
 	var output bytes.Buffer
@@ -39,6 +44,49 @@ func TestEventEncoding(t *testing.T) {
 	}
 	if got := output.String(); got != ": one\n: two\n\n" {
 		t.Fatalf("comment = %q", got)
+	}
+}
+
+func TestEventEncodingRejectsInvalidInputAndWriteFailures(t *testing.T) {
+	writeError := errors.New("write failed")
+	cases := []struct {
+		name  string
+		write func() error
+	}{
+		{"nil event writer", func() error { return sse.WriteEvent(nil, sse.Event{}) }},
+		{"nil comment writer", func() error { return sse.WriteComment(nil, "") }},
+		{"event name newline", func() error { return sse.WriteEvent(io.Discard, sse.Event{Name: "bad\nname"}) }},
+		{"negative retry", func() error { return sse.WriteEvent(io.Discard, sse.Event{Retry: -time.Second}) }},
+		{"JSON marshal", func() error { _, err := sse.JSON("event", make(chan int)); return err }},
+		{"JSON event name", func() error { _, err := sse.JSON("bad\nname", struct{}{}); return err }},
+		{"short write", func() error {
+			return sse.WriteEvent(writerFunc(func(data []byte) (int, error) { return len(data) - 1, nil }), sse.Event{})
+		}},
+		{"event write error", func() error {
+			return sse.WriteEvent(writerFunc(func([]byte) (int, error) { return 0, writeError }), sse.Event{})
+		}},
+		{"comment write error", func() error {
+			return sse.WriteComment(writerFunc(func([]byte) (int, error) { return 0, writeError }), "heartbeat")
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.write(); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+
+	var output bytes.Buffer
+	if err := sse.WriteEvent(&output, sse.Event{Retry: time.Nanosecond, Data: []byte("one\rtwo")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); got != "retry: 1\ndata: one\ndata: two\n\n" {
+		t.Fatalf("event = %q", got)
+	}
+	output.Reset()
+	if err := sse.WriteComment(&output, ""); err != nil || output.String() != ":\n\n" {
+		t.Fatalf("empty comment = %q, err=%v", output.String(), err)
 	}
 }
 
@@ -110,6 +158,31 @@ func TestHubValidatesConfiguration(t *testing.T) {
 		if _, err := sse.NewHub(config); err == nil {
 			t.Fatalf("expected configuration error for %#v", config)
 		}
+	}
+}
+
+func TestHubCloseAndImmediateCancellation(t *testing.T) {
+	hub, err := sse.NewHub(sse.HubConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	//nolint:staticcheck // Exercise Subscribe's supported nil-context fallback.
+	nilContextEvents := hub.Subscribe(nil)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, open := <-hub.Subscribe(canceled); open {
+		t.Fatal("canceled subscription remained open")
+	}
+	hub.Close()
+	hub.Close()
+	if _, open := <-nilContextEvents; open {
+		t.Fatal("subscription remained open after close")
+	}
+	if _, open := <-hub.Subscribe(t.Context()); open {
+		t.Fatal("subscription created after close remained open")
+	}
+	if delivered, err := hub.Publish(sse.Event{Data: []byte("ignored")}); err != nil || delivered != 0 {
+		t.Fatalf("publish after close delivered=%d err=%v", delivered, err)
 	}
 }
 

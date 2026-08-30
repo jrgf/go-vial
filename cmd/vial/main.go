@@ -389,9 +389,7 @@ func writeJSON(output io.Writer, value any) error {
 
 func writeRoutes(output io.Writer, routes []vial.Route, jsonOutput bool) error {
 	if jsonOutput {
-		encoder := json.NewEncoder(output)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(routes)
+		return writeJSON(output, routes)
 	}
 
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)

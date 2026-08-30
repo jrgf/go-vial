@@ -155,7 +155,6 @@ type Hub struct {
 	policy       SlowConsumerPolicy
 	heartbeat    time.Duration
 	writeTimeout time.Duration
-	closed       bool
 }
 
 type subscriber struct {
@@ -213,7 +212,7 @@ func (hub *Hub) Subscribe(contextValue context.Context) <-chan Event {
 	}
 
 	hub.mu.Lock()
-	if hub.closed {
+	if hub.subscribers == nil {
 		hub.mu.Unlock()
 		close(subscription.events)
 		close(subscription.done)
@@ -240,7 +239,7 @@ func (hub *Hub) Publish(event Event) (int, error) {
 	}
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
-	if hub.closed {
+	if hub.subscribers == nil {
 		return 0, nil
 	}
 	delivered := 0
@@ -266,15 +265,14 @@ func (hub *Hub) Publish(event Event) (int, error) {
 func (hub *Hub) Close() {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
-	if hub.closed {
+	if hub.subscribers == nil {
 		return
 	}
-	hub.closed = true
 	for subscription := range hub.subscribers {
-		delete(hub.subscribers, subscription)
 		close(subscription.done)
 		close(subscription.events)
 	}
+	hub.subscribers = nil
 }
 
 func (hub *Hub) remove(subscription *subscriber) {

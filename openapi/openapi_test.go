@@ -28,6 +28,27 @@ type widget struct {
 	Next      *widget   `json:"next,omitempty"`
 }
 
+type textValue string
+
+func (textValue) MarshalText() ([]byte, error) { return []byte("value"), nil }
+
+type schemaShapes struct {
+	Bool     bool            `json:"bool"`
+	Int      int             `json:"int"`
+	Int32    int32           `json:"int32"`
+	Uint     uint            `json:"uint"`
+	Uint64   uint64          `json:"uint64"`
+	Float32  float32         `json:"float32"`
+	Float64  float64         `json:"float64"`
+	Bytes    []byte          `json:"bytes"`
+	List     []string        `json:"list"`
+	Fixed    [2]string       `json:"fixed"`
+	Map      map[string]int  `json:"map"`
+	Raw      json.RawMessage `json:"raw"`
+	Text     textValue       `json:"text"`
+	Anything any             `json:"anything"`
+}
+
 type document struct {
 	OpenAPI string `json:"openapi"`
 	Info    struct {
@@ -65,6 +86,7 @@ func TestGenerateAndServe(t *testing.T) {
 	app := vial.New()
 	app.Post("/widgets/{id}", func(*vial.Context) error { return nil }, vial.RouteName("widgets.create"))
 	app.Get("/events/{topic...}", func(*vial.Context) error { return nil }, vial.RouteName("events.watch"))
+	app.Get("/shapes", func(*vial.Context) error { return nil }, vial.RouteName("shapes.get"))
 	app.Get("/slash/", func(*vial.Context) error { return nil })
 	app.HandleHTTP("/assets/", http.NotFoundHandler())
 
@@ -86,6 +108,7 @@ func TestGenerateAndServe(t *testing.T) {
 				},
 			},
 			"events.watch": {Responses: map[int]openapi.Response{http.StatusOK: {ContentType: "text/event-stream"}}},
+			"shapes.get":   {Responses: map[int]openapi.Response{http.StatusOK: {Body: schemaShapes{}}}},
 		},
 	}
 	if err := openapi.Mount(app, "/openapi.json", config); err != nil {
@@ -140,7 +163,14 @@ func TestGenerateAndServe(t *testing.T) {
 	if decoded.Components.SecuritySchemes["bearer"]["scheme"] != "bearer" || len(decoded.Security) != 1 {
 		t.Fatalf("security = %#v %#v", decoded.Components, decoded.Security)
 	}
+	shapes := decoded.Paths["/shapes"]["get"].Responses["200"].Content["application/json"].Schema["properties"].(map[string]any)
+	if shapes["bool"].(map[string]any)["type"] != "boolean" || shapes["bytes"].(map[string]any)["contentEncoding"] != "base64" || shapes["text"].(map[string]any)["type"] != "string" {
+		t.Fatalf("shape schemas = %#v", shapes)
+	}
 
+	config.Title = "mutated"
+	delete(config.Operations, "widgets.create")
+	delete(config.SecuritySchemes, "bearer")
 	server := testkit.Start(t, app)
 	response := server.Do(server.NewRequest(http.MethodGet, "/openapi.json", nil))
 	response.RequireStatus(http.StatusOK)
@@ -158,5 +188,34 @@ func TestGenerateAndServe(t *testing.T) {
 	}
 	if _, err := openapi.Handler(app, openapi.Config{}); err == nil {
 		t.Fatal("invalid configuration returned nil")
+	}
+}
+
+func TestConfigurationValidation(t *testing.T) {
+	validScheme := map[string]openapi.SecurityScheme{"auth": {Type: "http", Scheme: "bearer"}}
+	cases := []openapi.Config{
+		{},
+		{Title: "API"},
+		{Title: "API", Version: "1", Operations: map[string]openapi.Operation{"": {}}},
+		{Title: "API", Version: "1", Operations: map[string]openapi.Operation{"route": {RequestContentType: "application/json"}}},
+		{Title: "API", Version: "1", Operations: map[string]openapi.Operation{"route": {Request: struct{}{}, RequestContentType: "not a media type"}}},
+		{Title: "API", Version: "1", Operations: map[string]openapi.Operation{"route": {Responses: map[int]openapi.Response{99: {}}}}},
+		{Title: "API", Version: "1", Operations: map[string]openapi.Operation{"route": {Responses: map[int]openapi.Response{200: {ContentType: "not a media type"}}}}},
+		{Title: "API", Version: "1", SecuritySchemes: map[string]openapi.SecurityScheme{"": {Type: "http", Scheme: "basic"}}},
+		{Title: "API", Version: "1", SecuritySchemes: map[string]openapi.SecurityScheme{"auth": {Type: "http"}}},
+		{Title: "API", Version: "1", SecuritySchemes: map[string]openapi.SecurityScheme{"auth": {Type: "apiKey", In: "header"}}},
+		{Title: "API", Version: "1", SecuritySchemes: map[string]openapi.SecurityScheme{"auth": {Type: "apiKey", Name: "key", In: "body"}}},
+		{Title: "API", Version: "1", SecuritySchemes: map[string]openapi.SecurityScheme{"auth": {Type: "oauth2"}}},
+		{Title: "API", Version: "1", Security: []openapi.SecurityRequirement{{"missing": {}}}},
+		{Title: "API", Version: "1", SecuritySchemes: validScheme, Security: []openapi.SecurityRequirement{{"auth": {"scope"}}}},
+		{Title: "API", Version: "1", SecuritySchemes: validScheme, Operations: map[string]openapi.Operation{"route": {Security: []openapi.SecurityRequirement{{"missing": {}}}}}},
+	}
+	for index, config := range cases {
+		if _, err := openapi.Handler(vial.New(), config); err == nil {
+			t.Fatalf("case %d returned nil", index)
+		}
+	}
+	if _, err := openapi.Handler(nil, openapi.Config{Title: "API", Version: "1"}); err == nil {
+		t.Fatal("nil application returned nil")
 	}
 }
