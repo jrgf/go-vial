@@ -99,6 +99,9 @@ type Context struct {
 	routeErr    error
 	logger      *slog.Logger
 	bodyLimited bool
+	afterMu     sync.Mutex
+	afterHooks  []func()
+	finished    bool
 
 	values *requestValues
 }
@@ -151,6 +154,40 @@ func (context *Context) BeforeCommit(hook func(http.Header)) error {
 		return errors.New("vial: response already committed")
 	}
 	return nil
+}
+
+// AfterResponse registers work that runs synchronously after the handler and
+// error renderer finish, but before request-scoped resources are cleaned up.
+// Hooks must not block.
+func (context *Context) AfterResponse(hook func()) error {
+	if hook == nil {
+		return errors.New("vial: after-response hook cannot be nil")
+	}
+	context.afterMu.Lock()
+	defer context.afterMu.Unlock()
+	if context.finished {
+		return errors.New("vial: response processing already finished")
+	}
+	context.afterHooks = append(context.afterHooks, hook)
+	return nil
+}
+
+func (context *Context) finishResponse() {
+	context.afterMu.Lock()
+	context.finished = true
+	hooks := context.afterHooks
+	context.afterHooks = nil
+	context.afterMu.Unlock()
+	for _, hook := range hooks {
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					context.Logger().Error("after-response hook panicked", "panic", recovered)
+				}
+			}()
+			hook()
+		}()
+	}
 }
 
 // Flush sends buffered response data when the server supports streaming.

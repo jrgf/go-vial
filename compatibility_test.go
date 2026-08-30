@@ -85,7 +85,22 @@ func TestApplication(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := vial.New()
-	app.Use(middleware.SecurityHeaders(), limit, sessions.Middleware(), identities.Middleware(), middleware.RequestID(), middleware.Recover())
+	var standard vial.HTTPMiddleware = func(next http.Handler) http.Handler { return next }
+	app.UseHTTP(standard)
+	metrics := &middleware.HTTPMetrics{}
+	app.Use(
+		middleware.SecurityHeaders(),
+		limit,
+		sessions.Middleware(),
+		identities.Middleware(),
+		middleware.RequestID(),
+		middleware.TraceContext(middleware.W3CTraceID),
+		metrics.Middleware(),
+		middleware.Recover(),
+	)
+	_ = middleware.TraceIDFromContext
+	_ = middleware.TraceIDFromRequest
+	_ = middleware.TraceParentHeader
 	app.Get("/", func(context *vial.Context) error {
 		return renderer.HTML(context, http.StatusOK, "page", nil)
 	}, vial.RouteName("home"))
@@ -106,6 +121,7 @@ func TestApplication(t *testing.T) {
 		identity, _ := identities.From(context)
 		return context.JSON(http.StatusOK, identity)
 	}, vial.RouteMiddleware(identities.Require()))
+	app.Get("/metrics/http", metrics.Handler)
 
 	server := testkit.Start(t, app)
 	response := server.Do(server.NewRequest(http.MethodGet, "/", nil))
@@ -131,6 +147,11 @@ func TestApplication(t *testing.T) {
 	}
 	authenticated := server.Do(server.NewRequest(http.MethodGet, "/authenticated", nil))
 	authenticated.RequireStatus(http.StatusOK)
+	metricResponse := server.Do(server.NewRequest(http.MethodGet, "/metrics/http", nil))
+	metricResponse.RequireStatus(http.StatusOK)
+	if !strings.Contains(metricResponse.Text(), "vial_http_requests_total") {
+		t.Fatal("HTTP metrics are missing")
+	}
 }
 `
 

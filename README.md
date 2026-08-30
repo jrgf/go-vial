@@ -27,6 +27,7 @@ batteries may use focused dependencies.
 - Encrypted cookie sessions with secure defaults, flash values, and key rotation
 - Provider-neutral request identities and authentication/grant guards
 - Restrictive browser security headers and bounded local rate limiting
+- Route-bounded OpenMetrics, native HTTP tracing integration, and correlated IDs
 - JSON, text, redirects, and empty responses
 - Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
@@ -53,7 +54,9 @@ batteries may use focused dependencies.
    standard handler with Vial middleware, limits, and graceful shutdown.
 5. [`examples/grpc`](examples/grpc) shares one h2c listener with HTTP routes and
    demonstrates standard interceptors, TLS, streaming, and graceful shutdown.
-6. [vial-gateway](https://github.com/jrgf/vial-gateway) and
+6. [`examples/observability`](examples/observability) exposes HTTP metrics and
+   correlates request and W3C trace IDs in structured logs.
+7. [vial-gateway](https://github.com/jrgf/vial-gateway) and
    [vialboard](https://github.com/jrgf/vialboard) are complete applications.
 
 ## Project status
@@ -309,6 +312,18 @@ keyed by `Context.ClientIP()` by default. The runnable
 Use a gateway or shared store when a limit must span replicas. See
 [`docs/security.md`](docs/security.md) for proxy, HSTS, key-capacity, and CSP
 guidance.
+
+## Observability
+
+`middleware.HTTPMetrics` records request counts, active requests, and a fixed
+duration histogram using registered route patterns instead of raw paths.
+`App.UseHTTP` accepts standard `net/http` middleware, including tracing
+libraries. `middleware.TraceContext` adds a validated trace ID to request state
+and structured logs alongside `X-Request-ID`.
+
+The runnable [`examples/observability`](examples/observability) application
+exposes `/metrics`. See [`docs/observability.md`](docs/observability.md) for
+tracer integration, metric names, middleware order, and deployment guidance.
 
 ## Testing
 

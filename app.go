@@ -46,18 +46,35 @@ func (writer *routeMissWriter) Write(body []byte) (int, error) {
 type App struct {
 	mu sync.RWMutex
 
-	config        config
-	routes        []routeDefinition
-	modules       []string
-	middleware    []Middleware
-	errorHandler  ErrorHandler
-	state         applicationState
-	buildErr      error
-	compiledRoot  Handler
-	startHooks    []LifecycleHook
-	stopHooks     []LifecycleHook
-	tasks         []taskDefinition
-	asyncExecutor AsyncExecutor
+	config         config
+	routes         []routeDefinition
+	modules        []string
+	middleware     []Middleware
+	httpMiddleware []HTTPMiddleware
+	errorHandler   ErrorHandler
+	state          applicationState
+	buildErr       error
+	compiledRoot   Handler
+	compiledHTTP   http.Handler
+	startHooks     []LifecycleHook
+	stopHooks      []LifecycleHook
+	tasks          []taskDefinition
+	asyncExecutor  AsyncExecutor
+}
+
+// UseHTTP adds standard net/http middleware around the complete application.
+// It is intended for tracing and instrumentation libraries that use the native
+// middleware contract.
+func (app *App) UseHTTP(middleware ...HTTPMiddleware) {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	app.ensureMutableLocked()
+
+	for _, item := range middleware {
+		if item != nil {
+			app.httpMiddleware = append(app.httpMiddleware, item)
+		}
+	}
 }
 
 // New creates an application with the supplied options.
@@ -284,6 +301,11 @@ func (app *App) Build() error {
 		}
 		return compiled(contextValue)
 	}
+	app.compiledHTTP = chainHTTP(http.HandlerFunc(app.serveHTTP), app.httpMiddleware...)
+	if app.compiledHTTP == nil {
+		app.buildErr = fmt.Errorf("standard HTTP middleware returned a nil handler")
+		return app.buildErr
+	}
 	return nil
 }
 
@@ -340,12 +362,17 @@ func (app *App) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
+	app.compiledHTTP.ServeHTTP(writer, request)
+}
+
+func (app *App) serveHTTP(writer http.ResponseWriter, request *http.Request) {
 	root := app.compiledRoot
 	errorHandler := app.errorHandler
 
 	response := newResponseWriter(writer)
 	contextValue := newContext(app, response, request)
 	defer contextValue.cleanup()
+	defer contextValue.finishResponse()
 	if err := root(contextValue); err != nil {
 		applyHTTPErrorHeaders(contextValue, err)
 		renderErrorSafely(contextValue, err, errorHandler)

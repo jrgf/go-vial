@@ -9,6 +9,8 @@
   and application-defined grant checks.
 - Add restrictive browser security headers and bounded, trusted-proxy-aware
   in-process rate limiting.
+- Add route-bounded HTTP OpenMetrics, standard `net/http` tracing middleware
+  integration, final-response hooks, and request/log trace correlation.
 
 ## 0.18.0
 - gRPC,SSE,Websockets examples
