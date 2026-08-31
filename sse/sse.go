@@ -150,7 +150,7 @@ type HubConfig struct {
 // Hub fans events out to bounded subscriber channels.
 type Hub struct {
 	mu           sync.Mutex
-	subscribers  map[*subscriber]struct{}
+	subscribers  map[string]map[*subscriber]struct{}
 	buffer       int
 	policy       SlowConsumerPolicy
 	heartbeat    time.Duration
@@ -158,6 +158,7 @@ type Hub struct {
 }
 
 type subscriber struct {
+	topic  string
 	events chan Event
 	done   chan struct{}
 }
@@ -186,7 +187,7 @@ func NewHub(config HubConfig) (*Hub, error) {
 		return nil, errors.New("sse: invalid slow-consumer policy")
 	}
 	return &Hub{
-		subscribers:  make(map[*subscriber]struct{}),
+		subscribers:  make(map[string]map[*subscriber]struct{}),
 		buffer:       config.SubscriberBuffer,
 		policy:       config.SlowConsumer,
 		heartbeat:    config.Heartbeat,
@@ -198,10 +199,17 @@ func NewHub(config HubConfig) (*Hub, error) {
 // canceled, the subscriber falls behind under DisconnectSlowConsumer, or the
 // hub closes.
 func (hub *Hub) Subscribe(contextValue context.Context) <-chan Event {
+	return hub.SubscribeTopic(contextValue, "")
+}
+
+// SubscribeTopic returns events published to one opaque topic. An empty topic
+// is the default broadcast channel used by Subscribe and Publish.
+func (hub *Hub) SubscribeTopic(contextValue context.Context, topic string) <-chan Event {
 	if contextValue == nil {
 		contextValue = context.Background()
 	}
 	subscription := &subscriber{
+		topic:  topic,
 		events: make(chan Event, hub.buffer),
 		done:   make(chan struct{}),
 	}
@@ -218,7 +226,10 @@ func (hub *Hub) Subscribe(contextValue context.Context) <-chan Event {
 		close(subscription.done)
 		return subscription.events
 	}
-	hub.subscribers[subscription] = struct{}{}
+	if hub.subscribers[topic] == nil {
+		hub.subscribers[topic] = make(map[*subscriber]struct{})
+	}
+	hub.subscribers[topic][subscription] = struct{}{}
 	hub.mu.Unlock()
 
 	go func() {
@@ -234,6 +245,11 @@ func (hub *Hub) Subscribe(contextValue context.Context) <-chan Event {
 // Publish snapshots an event and offers it to every current subscriber. It
 // returns the number of subscribers that accepted the event.
 func (hub *Hub) Publish(event Event) (int, error) {
+	return hub.PublishTopic("", event)
+}
+
+// PublishTopic offers an event only to subscribers of topic.
+func (hub *Hub) PublishTopic(topic string, event Event) (int, error) {
 	if err := validateEvent(event); err != nil {
 		return 0, err
 	}
@@ -243,7 +259,7 @@ func (hub *Hub) Publish(event Event) (int, error) {
 		return 0, nil
 	}
 	delivered := 0
-	for subscription := range hub.subscribers {
+	for subscription := range hub.subscribers[topic] {
 		snapshot := event
 		snapshot.Data = bytes.Clone(event.Data)
 		select {
@@ -251,9 +267,7 @@ func (hub *Hub) Publish(event Event) (int, error) {
 			delivered++
 		default:
 			if hub.policy == DisconnectSlowConsumer {
-				delete(hub.subscribers, subscription)
-				close(subscription.done)
-				close(subscription.events)
+				hub.disconnectLocked(subscription)
 			}
 		}
 	}
@@ -268,9 +282,11 @@ func (hub *Hub) Close() {
 	if hub.subscribers == nil {
 		return
 	}
-	for subscription := range hub.subscribers {
-		close(subscription.done)
-		close(subscription.events)
+	for _, subscriptions := range hub.subscribers {
+		for subscription := range subscriptions {
+			close(subscription.done)
+			close(subscription.events)
+		}
 	}
 	hub.subscribers = nil
 }
@@ -278,10 +294,18 @@ func (hub *Hub) Close() {
 func (hub *Hub) remove(subscription *subscriber) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
-	if _, exists := hub.subscribers[subscription]; !exists {
+	hub.disconnectLocked(subscription)
+}
+
+func (hub *Hub) disconnectLocked(subscription *subscriber) {
+	subscriptions := hub.subscribers[subscription.topic]
+	if _, exists := subscriptions[subscription]; !exists {
 		return
 	}
-	delete(hub.subscribers, subscription)
+	delete(subscriptions, subscription)
+	if len(subscriptions) == 0 {
+		delete(hub.subscribers, subscription.topic)
+	}
 	close(subscription.done)
 	close(subscription.events)
 }

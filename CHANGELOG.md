@@ -17,8 +17,9 @@
   security metadata, and a cached JSON document endpoint.
 - Add atomic project scaffolding, configuration validation, in-process OpenAPI
   export, and machine-readable CLI diagnostics.
-- Add bounded SSE fan-out, lifecycle-aware coder/websocket handlers, and a
-  grpc-go module with message limits and bounded graceful shutdown.
+- Add bounded SSE fan-out with isolated topics, lifecycle-aware coder/websocket
+  handlers, and a grpc-go module with message limits and bounded graceful
+  shutdown.
 
 ## 0.18.0
 - gRPC,SSE,Websockets examples

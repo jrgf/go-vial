@@ -148,6 +148,36 @@ func TestHubBoundsSlowConsumers(t *testing.T) {
 	}
 }
 
+func TestHubTopicsIsolateSubscribers(t *testing.T) {
+	hub, err := sse.NewHub(sse.HubConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := hub.SubscribeTopic(t.Context(), "first")
+	second := hub.SubscribeTopic(t.Context(), "second")
+	defaultEvents := hub.Subscribe(t.Context())
+
+	if delivered, err := hub.PublishTopic("first", sse.Event{Data: []byte("private")}); err != nil || delivered != 1 {
+		t.Fatalf("topic publish delivered=%d err=%v", delivered, err)
+	}
+	if event := <-first; string(event.Data) != "private" {
+		t.Fatalf("topic event = %q", event.Data)
+	}
+	for name, events := range map[string]<-chan sse.Event{"second": second, "default": defaultEvents} {
+		select {
+		case event := <-events:
+			t.Fatalf("%s subscriber received topic event %#v", name, event)
+		default:
+		}
+	}
+	if delivered, err := hub.Publish(sse.Event{Data: []byte("default")}); err != nil || delivered != 1 {
+		t.Fatalf("default publish delivered=%d err=%v", delivered, err)
+	}
+	if event := <-defaultEvents; string(event.Data) != "default" {
+		t.Fatalf("default event = %q", event.Data)
+	}
+}
+
 func TestHubValidatesConfiguration(t *testing.T) {
 	for _, config := range []sse.HubConfig{
 		{SubscriberBuffer: -1},
