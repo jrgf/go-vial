@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	version              = "0.18.0"
+	version              = "1.0.0-rc.1"
 	commit               = "development"
 	buildGoVersion       string
 	loadProgressInterval = time.Second

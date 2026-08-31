@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-rc.1
 
 - Add production encrypted cookie sessions with secure defaults, flash values,
   tamper rejection, size limits, and live key rotation.
