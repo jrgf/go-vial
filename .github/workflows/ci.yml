@@ -48,6 +48,9 @@ jobs:
       - name: Test gRPC example
         working-directory: examples/grpc
         run: go test ./...
+      - name: Compile database example
+        working-directory: examples/database
+        run: go test -run '^$' ./...
       - run: go vet ./...
 
   race:
@@ -77,6 +80,12 @@ jobs:
       - name: Check gRPC example vulnerabilities
         working-directory: examples/grpc
         run: govulncheck ./...
+      - name: Check securecookie example vulnerabilities
+        working-directory: examples/securecookie
+        run: govulncheck ./...
+      - name: Check database example vulnerabilities
+        working-directory: examples/database
+        run: govulncheck ./...
 
   fuzz:
     runs-on: ubuntu-latest
@@ -89,9 +98,10 @@ jobs:
       - name: Fuzz framework parsers
         shell: bash
         run: |
-          for target in FuzzSetScalar FuzzBindURLForm FuzzBindJSON FuzzClientIPForwarding FuzzRoutePatternRegistration; do
+          for target in FuzzSetScalar FuzzBindURLForm FuzzBindJSON FuzzRoutePatternRegistration FuzzNamedRouteURL; do
             go test -run '^$' -fuzz "^${target}$" -fuzztime 100000x .
           done
+          go test -run '^$' -fuzz '^FuzzClientIPForwarding$' -fuzztime 100000x ./tests/vial
           go test -run '^$' -fuzz '^FuzzSetText$' -fuzztime 100000x ./config
           for target in FuzzNormalizeOrigin FuzzCSRFTokenParsing; do
             go test -run '^$' -fuzz "^${target}$" -fuzztime 100000x ./middleware
@@ -108,7 +118,7 @@ jobs:
           go-version: '1.27.x'
           cache: false
       - name: Record benchmark sample
-        run: go test -run '^$' -bench '^BenchmarkHTTP$' -benchmem -count=5 . | tee benchmark.txt
+        run: go test -run '^$' -bench '^BenchmarkHTTP$' -benchmem -count=5 ./tests/vial | tee benchmark.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: benchmark-${{ github.sha }}

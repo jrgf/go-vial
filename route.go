@@ -1,7 +1,9 @@
 package vial
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -23,10 +25,69 @@ type RouteOption struct {
 	middleware []Middleware
 }
 
-// RouteName assigns a globally unique, stable observability and diagnostics
-// identifier. Route names are not used for URL generation.
+// RouteName assigns a globally unique identifier for observability,
+// diagnostics, and URL generation through App.URL.
 func RouteName(name string) RouteOption {
 	return RouteOption{name: name, hasName: true}
+}
+
+// URL returns a root-relative, escaped path for a named route. Group prefixes
+// are included; host patterns do not add an authority. Calling URL validates
+// and freezes registration, like Routes. It is safe for concurrent use.
+//
+// Parameters are raw, unescaped values and must match the route's names exactly.
+// A {name} parameter is one segment; {name...} splits on slash and may be empty
+// or end with a slash. Empty interior segments, dot segments, and a slash-only
+// single parameter are rejected because ServeMux cannot match them as intended.
+// Add query parameters separately with net/url.Values.
+func (app *App) URL(name string, parameters map[string]string) (string, error) {
+	if !app.built.Load() {
+		if err := app.Build(); err != nil {
+			return "", err
+		}
+	}
+	route, ok := app.namedRoutes[name]
+	if !ok {
+		return "", fmt.Errorf("vial: unknown route name %q", name)
+	}
+	if len(parameters) != len(route.Parameters) {
+		return "", fmt.Errorf("vial: route %q requires %d parameters, got %d", name, len(route.Parameters), len(parameters))
+	}
+	path := strings.TrimSuffix(route.Path, "{$}")
+	if strings.HasPrefix(path, "//") {
+		return "", fmt.Errorf("vial: route %q does not have a root-relative URL path", name)
+	}
+	segments := strings.Split(path, "/")
+	for index, segment := range segments {
+		if !strings.HasPrefix(segment, "{") || !strings.HasSuffix(segment, "}") {
+			if decoded, err := url.PathUnescape(segment); err == nil {
+				segment = decoded
+			}
+			if segment != "." && segment != ".." {
+				segments[index] = url.PathEscape(segment)
+			}
+			continue
+		}
+		parameter := segment[1 : len(segment)-1]
+		wildcard := strings.HasSuffix(parameter, "...")
+		parameter = strings.TrimSuffix(parameter, "...")
+		value, present := parameters[parameter]
+		if !present {
+			return "", fmt.Errorf("vial: route %q is missing parameter %q", name, parameter)
+		}
+		parts := []string{value}
+		if wildcard {
+			parts = strings.Split(value, "/")
+		}
+		for partIndex, part := range parts {
+			if part == "." || part == ".." || part == "/" || (part == "" && (!wildcard || partIndex != len(parts)-1)) {
+				return "", fmt.Errorf("vial: route %q parameter %q contains an empty, slash-only, or dot segment", name, parameter)
+			}
+			parts[partIndex] = url.PathEscape(part)
+		}
+		segments[index] = strings.Join(parts, "/")
+	}
+	return strings.Join(segments, "/"), nil
 }
 
 // RouteMiddleware applies middleware only to the configured route.

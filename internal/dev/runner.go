@@ -25,7 +25,7 @@ func NewRunner(config Config) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	watcher, err := newSourceWatcher(normalized.Root, normalized.Excludes)
+	watcher, err := newSourceWatcher(normalized.Root, normalized.Excludes, normalized.WatchPatterns...)
 	if err != nil {
 		return nil, fmt.Errorf("create source watcher: %w", err)
 	}

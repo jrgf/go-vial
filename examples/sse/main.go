@@ -2,15 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"time"
 
 	"github.com/jrgf/go-vial"
+	"github.com/jrgf/go-vial/sse"
 )
 
 type Event struct {
@@ -18,46 +15,42 @@ type Event struct {
 }
 
 func main() {
-	if err := newApp(time.Second).Run(context.Background(), ":8080"); err != nil {
+	app, err := newApp(time.Second)
+	if err != nil {
+		slog.Error("create application", "error", err)
+		os.Exit(1)
+	}
+	if err := app.Run(context.Background(), ":8080"); err != nil {
 		slog.Error("application stopped with an error", "error", err)
 		os.Exit(1)
 	}
 }
 
-func newApp(interval time.Duration) *vial.App {
+func newApp(interval time.Duration) (*vial.App, error) {
+	hub, err := sse.NewHub(sse.HubConfig{})
+	if err != nil {
+		return nil, err
+	}
 	app := vial.New()
-	app.Get("/events", func(contextValue *vial.Context) error {
-		header := contextValue.Response().Header()
-		header.Set("Content-Type", "text/event-stream")
-		header.Set("Cache-Control", "no-cache")
-		header.Set("X-Content-Type-Options", "nosniff")
-		if err := contextValue.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			return err
-		}
-		contextValue.Response().WriteHeader(http.StatusOK)
-		if err := contextValue.Flush(); err != nil {
-			return err
-		}
-
+	app.HandleHTTP("GET /events", hub.Handler())
+	app.Go("events", func(contextValue context.Context) error {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+		defer hub.Close()
 		for {
 			select {
-			case <-contextValue.Request().Context().Done():
+			case <-contextValue.Done():
 				return nil
 			case now := <-ticker.C:
-				data, err := json.Marshal(Event{Time: now})
+				event, err := sse.JSON("time", Event{Time: now})
 				if err != nil {
-					return fmt.Errorf("encode event: %w", err)
+					return err
 				}
-				if _, err := fmt.Fprintf(contextValue.Response(), "data: %s\n\n", data); err != nil {
-					return fmt.Errorf("write event: %w", err)
-				}
-				if err := contextValue.Flush(); err != nil {
+				if _, err := hub.Publish(event); err != nil {
 					return err
 				}
 			}
 		}
 	})
-	return app
+	return app, nil
 }

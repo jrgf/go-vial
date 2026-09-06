@@ -52,13 +52,17 @@ func TestRunnerRebuildsAndStopsApplication(t *testing.T) {
 	source := `package main
 
 import (
+	_ "embed"
 	"os"
 	"os/signal"
 	"strconv"
 )
 
+//go:embed view.html
+var view string
+
 func main() {
-	_ = os.WriteFile("started-"+strconv.Itoa(os.Getpid()), nil, 0o644)
+	_ = os.WriteFile("started-"+strconv.Itoa(os.Getpid()), []byte(view), 0o644)
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 	<-interrupt
@@ -67,6 +71,10 @@ func main() {
 	mainPath := filepath.Join(root, "main.go")
 	if err := os.WriteFile(mainPath, []byte(source), 0o644); err != nil {
 		t.Fatalf("write main.go: %v", err)
+	}
+	assetPath := filepath.Join(root, "view.html")
+	if err := os.WriteFile(assetPath, []byte("first view"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
 	output, err := os.Create(filepath.Join(root, "runner.log"))
@@ -78,6 +86,7 @@ func main() {
 		Root:           root,
 		Debounce:       10 * time.Millisecond,
 		RestartTimeout: 3 * time.Second,
+		WatchPatterns:  []string{"*.html"},
 		Stdout:         output,
 		Stderr:         output,
 	})
@@ -91,10 +100,18 @@ func main() {
 		defer cancel()
 		firstProcess, err := waitForNewMarker(root, "", 10*time.Second)
 		if err == nil {
-			err = os.WriteFile(mainPath, []byte(source+"\n// rebuild\n"), 0o644)
+			err = os.WriteFile(assetPath, []byte("updated embedded view"), 0o644)
 		}
 		if err == nil {
-			_, err = waitForNewMarker(root, firstProcess, 10*time.Second)
+			var next string
+			next, err = waitForNewMarker(root, firstProcess, 10*time.Second)
+			if err == nil {
+				var content []byte
+				content, err = os.ReadFile(filepath.Join(root, next))
+				if err == nil && string(content) != "updated embedded view" {
+					err = fmt.Errorf("rebuild retained stale embedded content: %q", content)
+				}
+			}
 		}
 		verification <- err
 	}()

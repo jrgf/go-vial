@@ -8,16 +8,25 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
 )
 
-const routesOutputEnvironment = "VIAL_ROUTES_OUTPUT"
+const (
+	routesOutputEnvironment         = "VIAL_ROUTES_OUTPUT"
+	httpInspectionOutputEnvironment = "VIAL_HTTP_INSPECTION_OUTPUT"
+	httpInspectionPathEnvironment   = "VIAL_HTTP_INSPECTION_PATH"
+)
 
 // Run listens on address and serves until the parent context or a supported OS
 // shutdown signal is received.
 func (app *App) Run(contextValue context.Context, address string) error {
+	if output := os.Getenv(httpInspectionOutputEnvironment); output != "" {
+		return app.writeHTTPInspection(contextValue, os.Getenv(httpInspectionPathEnvironment), output)
+	}
 	if output := os.Getenv(routesOutputEnvironment); output != "" {
 		routes, err := app.Routes()
 		if err != nil {
@@ -47,6 +56,29 @@ func (app *App) Run(contextValue context.Context, address string) error {
 		return fmt.Errorf("listen on %s: %w", address, err)
 	}
 	return app.Serve(contextValue, listener)
+}
+
+func (app *App) writeHTTPInspection(contextValue context.Context, path, output string) error {
+	parsed, err := url.ParseRequestURI(path)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return fmt.Errorf("inspect HTTP path %q: invalid path", path)
+	}
+	if err := app.Build(); err != nil {
+		return err
+	}
+	if contextValue == nil {
+		contextValue = context.Background()
+	}
+	request := httptest.NewRequest(http.MethodGet, path, nil).WithContext(contextValue)
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, request)
+	if response.Code < http.StatusOK || response.Code >= http.StatusMultipleChoices {
+		return fmt.Errorf("inspect GET %s: status %d", path, response.Code)
+	}
+	if err := os.WriteFile(output, response.Body.Bytes(), 0o600); err != nil {
+		return fmt.Errorf("write HTTP inspection: %w", err)
+	}
+	return nil
 }
 
 // Serve runs the application on an existing listener. This is useful for tests

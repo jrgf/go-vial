@@ -58,7 +58,7 @@ func OptionalFile(path string) Option {
 func Environ(values []string) Option {
 	copied := append([]string(nil), values...)
 	return func(settings *settings) {
-		settings.environ = append([]string(nil), copied...)
+		settings.environ = copied
 	}
 }
 

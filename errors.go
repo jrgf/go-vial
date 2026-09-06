@@ -137,11 +137,24 @@ func applyHTTPErrorHeaders(context *Context, err error) {
 		return
 	}
 	for key, values := range httpErr.Headers {
-		context.response.Header()[key] = append([]string(nil), values...)
+		context.response.Header()[http.CanonicalHeaderKey(key)] = append([]string(nil), values...)
 	}
 }
 
 func defaultErrorHandler(context *Context, err error) {
+	renderHTTPError(context, err, false)
+}
+
+// ProblemDetailsErrorHandler renders RFC 9457 application/problem+json errors.
+// Enable it with App.SetErrorHandler before building the application. It uses
+// the default status and safe-message mapping, with code and fields extensions.
+// Error causes and request URLs are not included. Already committed responses
+// are left intact, and failures are logged like the default error handler.
+func ProblemDetailsErrorHandler(context *Context, err error) {
+	renderHTTPError(context, err, true)
+}
+
+func renderHTTPError(context *Context, err error, problemDetails bool) {
 	if context.Committed() {
 		context.Logger().Error("handler failed after response was committed", "error", err)
 		return
@@ -153,18 +166,27 @@ func defaultErrorHandler(context *Context, err error) {
 		context.Logger().Error("request failed", "error", err)
 	}
 
-	context.response.Header().Set("Content-Type", "application/json; charset=utf-8")
-	context.response.WriteHeader(mapped.status)
-	details := map[string]any{
-		"code":    mapped.code,
-		"message": mapped.message,
-	}
+	details := map[string]any{"code": mapped.code}
 	if len(mapped.fields) > 0 {
 		details["fields"] = mapped.fields
 	}
-	_ = json.NewEncoder(context.response).Encode(map[string]any{
-		"error": details,
-	})
+	var body any = details
+	contentType := "application/json; charset=utf-8"
+	if problemDetails {
+		details["type"] = "about:blank"
+		details["status"] = mapped.status
+		details["detail"] = mapped.message
+		if title := http.StatusText(mapped.status); title != "" {
+			details["title"] = title
+		}
+		contentType = "application/problem+json"
+	} else {
+		details["message"] = mapped.message
+		body = map[string]any{"error": details}
+	}
+	context.response.Header().Set("Content-Type", contentType)
+	context.response.WriteHeader(mapped.status)
+	_ = json.NewEncoder(context.response).Encode(body)
 }
 
 type mappedHTTPError struct {

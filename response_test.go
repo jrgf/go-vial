@@ -63,6 +63,76 @@ func TestResponseWriterFlushAndPush(t *testing.T) {
 	}
 }
 
+func TestResponseWriterRunsBeforeCommitHooksOnce(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writer := newResponseWriter(recorder)
+	var calls int
+	if !writer.beforeCommit(func(header http.Header) {
+		calls++
+		header.Set("X-Before-Commit", "yes")
+	}) {
+		t.Fatal("failed to register hook before commitment")
+	}
+	writer.WriteHeader(http.StatusCreated)
+	writer.WriteHeader(http.StatusAccepted)
+	if calls != 1 || recorder.Header().Get("X-Before-Commit") != "yes" {
+		t.Fatalf("calls=%d header=%q", calls, recorder.Header().Get("X-Before-Commit"))
+	}
+	if writer.beforeCommit(func(http.Header) {}) {
+		t.Fatal("registered hook after commitment")
+	}
+}
+
+func TestResponseWriterStringWritesPreserveAccountingAndHooks(t *testing.T) {
+	for _, underlying := range []http.ResponseWriter{
+		httptest.NewRecorder(),
+		&plainWriter{header: make(http.Header)},
+		&shortStringWriter{ResponseWriter: httptest.NewRecorder()},
+	} {
+		writer := newResponseWriter(underlying)
+		calls := 0
+		writer.beforeCommit(func(header http.Header) {
+			calls++
+			header.Set("X-Hook", "yes")
+		})
+		written, err := io.WriteString(writer.capabilities, "hello")
+		want := 5
+		if _, short := underlying.(*shortStringWriter); short {
+			want = 2
+			if !errors.Is(err, io.ErrClosedPipe) {
+				t.Fatalf("string write lost error: %v", err)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if written != want || writer.BytesWritten() != int64(want) || !writer.Committed() || writer.Status() != http.StatusOK {
+			t.Fatalf("string write: written=%d bytes=%d committed=%v status=%d", written, writer.BytesWritten(), writer.Committed(), writer.Status())
+		}
+		writer.WriteHeader(http.StatusCreated)
+		if calls != 1 || underlying.Header().Get("X-Hook") != "yes" {
+			t.Fatalf("string write hooks: calls=%d headers=%v", calls, underlying.Header())
+		}
+	}
+}
+
+type shortStringWriter struct{ http.ResponseWriter }
+
+func (*shortStringWriter) WriteString(string) (int, error) { return 2, io.ErrClosedPipe }
+
+func TestContextRejectsInvalidBeforeCommitHooks(t *testing.T) {
+	writer := newResponseWriter(httptest.NewRecorder())
+	context := newContext(New(), writer, httptest.NewRequest(http.MethodGet, "/", nil))
+	if err := context.BeforeCommit(nil); err == nil {
+		t.Fatal("accepted nil before-commit hook")
+	}
+	if err := context.NoContent(http.StatusNoContent); err != nil {
+		t.Fatal(err)
+	}
+	if err := context.BeforeCommit(func(http.Header) {}); err == nil {
+		t.Fatal("accepted before-commit hook after response commitment")
+	}
+}
+
 func TestResponseWriterPreservesOnlyUnderlyingCapabilities(t *testing.T) {
 	plain := &plainWriter{header: make(http.Header)}
 	tests := []struct {

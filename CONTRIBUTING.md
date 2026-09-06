@@ -45,9 +45,13 @@ Do not commit generated files from `bin/`, `.vial/`, coverage profiles, editor s
 - The repository-wide 80% coverage gate
 - Race detection
 - `go vet`
+- Standalone example tests and database-example compilation
 - The CLI build
 
 Tests should verify observable behavior instead of private implementation details. Bug fixes should include a test that fails without the fix. Platform-specific changes must continue to compile on Linux, macOS, and Windows.
+Put public API tests in `tests/<package>`. Tests that require unexported symbols
+stay beside their source. Run `make coverage` to include coverage from both
+locations; the command uses `-coverpkg=./...`.
 
 Run `go mod tidy -diff` when changing module dependencies.
 
@@ -72,6 +76,8 @@ The value printed by `vial version` is the release source of truth. After that
 version and the changelog are updated, successful CI on `main` creates the tag,
 release title, notes, and binaries unless that version is already published.
 Published versions are never overwritten.
+Prepare candidates on a branch and require green CI on the exact commit before
+merging.
 
 ## License
 

@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+## 1.0.0-rc.1
+
+- Add `App.URL` for named-route paths with group prefixes, escaped parameters,
+  and wildcard validation, using the existing index built during registration.
+- Add opt-in RFC 9457 Problem Details through `ProblemDetailsErrorHandler`,
+  preserving public error mapping, field errors, and HTTP headers.
+- Normalize custom error-header names for case-insensitive HTTP access.
+- Mark prerelease versions as prereleases and exclude them from GitHub Latest.
+- Consolidate public API tests under `tests/`, retaining package-local tests for
+  private internals and updating coverage, fuzzing, and benchmark commands.
+- Reject nonportable JSON tag names during OpenAPI inference instead of guessing
+  a wire name that differs between supported Go versions.
+- Add explicit OpenAPI request and response body schemas for custom JSON types,
+  constraints, and examples, with validation and copied configuration buffers.
+- Match JSON embedded-field promotion, name conflicts, and `json:",string"`
+  in generated schemas; leave custom JSON marshaler output unconstrained.
+- Add repeatable `vial dev --watch` patterns for embedded templates, static
+  assets, and SQL files, preserving exclusions and debounced rebuilds.
+- Remove the application build lock from the request path after a successful
+  build, allocate request values lazily, and attach framework state with one
+  request-context copy in the common path.
+- Avoid redundant route metadata lookup when no application middleware needs
+  it, remove interface-wrapper allocations for optional response capabilities,
+  and preserve native string writes with response accounting and hooks.
+- Add concurrent dispatch benchmarks and an isolated, pinned Fiber comparison
+  over HTTP/1.1 with equivalent response checks.
+
+- Add production encrypted cookie sessions with secure defaults, flash values,
+  tamper rejection, size limits, and live key rotation.
+- Add response pre-commit hooks for safe header persistence.
+- Add provider-neutral request identities, challenged authentication guards,
+  and application-defined grant checks.
+- Add restrictive browser security headers and bounded, trusted-proxy-aware
+  in-process rate limiting.
+- Add route-bounded HTTP OpenMetrics, standard `net/http` tracing middleware
+  integration, final-response hooks, and request/log trace correlation.
+- Add `database/sql` transaction and embedded forward-migration helpers with a
+  PostgreSQL lifecycle and readiness example.
+- Add deterministic OpenAPI 3.1 generation, request and response schemas,
+  security metadata, and a cached JSON document endpoint.
+- Add atomic project scaffolding, configuration validation, in-process OpenAPI
+  export, and machine-readable CLI diagnostics.
+- Add bounded SSE fan-out with isolated topics, lifecycle-aware coder/websocket
+  handlers, and a grpc-go module with message limits and bounded graceful
+  shutdown.
+
 ## 0.18.0
 - gRPC,SSE,Websockets examples
 - Added more CLI commands

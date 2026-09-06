@@ -53,7 +53,7 @@ func TestStringList(t *testing.T) {
 }
 
 func TestRunCommands(t *testing.T) {
-	for _, arguments := range [][]string{nil, {"help"}, {"version"}, {"version", "--verbose"}, {"version", "--help"}, {"--version"}, {"-v"}} {
+	for _, arguments := range [][]string{nil, {"help"}, {"version"}, {"version", "--verbose"}, {"version", "--json"}, {"version", "--help"}, {"--version"}, {"-v"}} {
 		if err := run(arguments); err != nil {
 			t.Errorf("run(%q): %v", arguments, err)
 		}
@@ -99,7 +99,8 @@ func TestVersionOutput(t *testing.T) {
 	}{
 		{want: "1.0.0\n"},
 		{arguments: []string{"--verbose"}, want: "version=1.0.0\ncommit=abc123\ngo=go1.26.6\n"},
-		{arguments: []string{"--help"}, want: "Usage: vial version [--verbose]\n"},
+		{arguments: []string{"--json"}, want: "{\n  \"commit\": \"abc123\",\n  \"go\": \"go1.26.6\",\n  \"version\": \"1.0.0\"\n}\n"},
+		{arguments: []string{"--help"}, want: "Usage: vial version [--verbose|--json]\n"},
 	} {
 		var output bytes.Buffer
 		if err := printVersion(test.arguments, &output); err != nil {
@@ -140,13 +141,112 @@ func TestRunDoctor(t *testing.T) {
 	if got := output.String(); got != "vial doctor: ok (routes: 1)\n" {
 		t.Fatalf("doctor output = %q", got)
 	}
+
+	output.Reset()
+	if err := runDoctor([]string{"--json", "../../examples/config"}, &output); err != nil {
+		t.Fatalf("run doctor JSON: %v", err)
+	}
+	var result struct {
+		OK          bool `json:"ok"`
+		Routes      int  `json:"routes"`
+		NamedRoutes int  `json:"named_routes"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode doctor: %v", err)
+	}
+	if !result.OK || result.Routes != 1 || result.NamedRoutes != 1 {
+		t.Fatalf("doctor result = %#v", result)
+	}
+}
+
+func TestRunConfigAndOpenAPI(t *testing.T) {
+	var output bytes.Buffer
+	if err := runConfig([]string{"--json", "../../examples/config"}, &output); err != nil {
+		t.Fatalf("run config: %v", err)
+	}
+	var configResult struct {
+		Valid bool `json:"valid"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &configResult); err != nil || !configResult.Valid {
+		t.Fatalf("config result = %#v, err=%v", configResult, err)
+	}
+
+	output.Reset()
+	if err := runOpenAPI([]string{"../../examples/openapi"}, &output); err != nil {
+		t.Fatalf("run OpenAPI: %v", err)
+	}
+	var document struct {
+		OpenAPI string                     `json:"openapi"`
+		Paths   map[string]json.RawMessage `json:"paths"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &document); err != nil {
+		t.Fatalf("decode OpenAPI: %v", err)
+	}
+	if document.OpenAPI != "3.1.0" || len(document.Paths) == 0 {
+		t.Fatalf("OpenAPI document = %#v", document)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "openapi.json")
+	if err := runOpenAPI([]string{"--output", outputPath, "../../examples/openapi"}, io.Discard); err != nil {
+		t.Fatalf("write OpenAPI: %v", err)
+	}
+	if data, err := os.ReadFile(outputPath); err != nil || !json.Valid(data) {
+		t.Fatalf("saved OpenAPI document: valid=%t, err=%v", json.Valid(data), err)
+	}
+}
+
+func TestRunNew(t *testing.T) {
+	originalVersion := version
+	version = "1.0.0"
+	t.Cleanup(func() { version = originalVersion })
+
+	directory := filepath.Join(t.TempDir(), "service")
+	var output bytes.Buffer
+	if err := runNew([]string{"--module", "example.com/service", "--json", directory}, &output); err != nil {
+		t.Fatalf("run new: %v", err)
+	}
+	var result struct {
+		Directory string `json:"directory"`
+		Module    string `json:"module"`
+		Go        string `json:"go"`
+		Vial      string `json:"vial"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode new result: %v", err)
+	}
+	if result.Directory != directory || result.Module != "example.com/service" || result.Go != "1.26.6" || result.Vial != "v1.0.0" {
+		t.Fatalf("new result = %#v", result)
+	}
+	for file, values := range map[string][]string{
+		"go.mod":  {"module example.com/service", "go 1.26.6", "github.com/jrgf/go-vial v1.0.0"},
+		"main.go": {"app.Health(\"/live\")", "app.Readiness(\"/ready\")", "app.Run(context.Background(), address)"},
+	} {
+		data, err := os.ReadFile(filepath.Join(directory, file))
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		for _, value := range values {
+			if !strings.Contains(string(data), value) {
+				t.Errorf("%s does not contain %q", file, value)
+			}
+		}
+	}
+	if err := runNew([]string{directory}, io.Discard); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("existing directory error = %v", err)
+	}
+	if err := runNew([]string{"--module", "../service", filepath.Join(t.TempDir(), "invalid")}, io.Discard); err == nil || !strings.Contains(err.Error(), "invalid Go module path") {
+		t.Fatalf("invalid module error = %v", err)
+	}
 }
 
 func TestRunDispatchesCommands(t *testing.T) {
 	for _, arguments := range [][]string{
+		{"new"},
 		{"dev", "one", "two"},
 		{"routes", "--unknown"},
 		{"doctor", "--unknown"},
+		{"config", "--unknown"},
+		{"openapi", "--unknown"},
 		{"load"},
 	} {
 		if err := run(arguments); err == nil {
@@ -357,6 +457,8 @@ func TestRunDevValidatesArguments(t *testing.T) {
 	err := runDev([]string{
 		"--root", missingRoot,
 		"--exclude", "generated",
+		"--watch", "*.html",
+		"--watch", "static/*.css",
 		"--verbose",
 		"./cmd/server",
 		"--",
@@ -364,5 +466,8 @@ func TestRunDevValidatesArguments(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "inspect project root") {
 		t.Fatalf("unexpected root error %v", err)
+	}
+	if err := runDev([]string{"--root", t.TempDir(), "--watch", "["}); err == nil || !strings.Contains(err.Error(), "invalid watch pattern") {
+		t.Fatalf("invalid watch pattern was not reported: %v", err)
 	}
 }

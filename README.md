@@ -8,7 +8,8 @@ tasks, test helpers, and a rebuild loop without replacing Go's HTTP types.
 
 Use Vial when an application needs more structure than raw `net/http` but must
 still work with standard handlers, middleware, contexts, response writers, and
-`httptest`. The runtime uses only the standard library.
+`httptest`. The core HTTP package uses only the standard library; optional
+batteries may use focused dependencies.
 
 ## Capabilities
 
@@ -20,9 +21,15 @@ still work with standard handlers, middleware, contexts, response writers, and
 - Collision-safe typed context values and trusted-proxy client IPs
 - Supervised startup, shutdown, background tasks, liveness, and readiness
 - RFC 7240 asynchronous operations with polling and cancellation
-- Server-Sent Events through standard HTTP streaming primitives
-- WebSocket integration through standard handlers and request cancellation
-- gRPC integration through standard handlers and native HTTP/2 protocols
+- Bounded Server-Sent Event fan-out with heartbeats and slow-consumer policy
+- Lifecycle-aware coder/websocket handlers with origin and message limits
+- grpc-go lifecycle modules with message limits, h2c, and graceful shutdown
+- Encrypted cookie sessions with secure defaults, flash values, and key rotation
+- Provider-neutral request identities and authentication/grant guards
+- Restrictive browser security headers and bounded local rate limiting
+- Route-bounded OpenMetrics, native HTTP tracing integration, and correlated IDs
+- `database/sql` transactions, readiness wiring, and embedded forward migrations
+- OpenAPI 3.1 generation from routes and Go request and response types
 - JSON, text, redirects, and empty responses
 - Cached path, query, header, cookie, form, multipart, and JSON binding
 - Centralized HTTP errors and transport-neutral application faults
@@ -30,36 +37,46 @@ still work with standard handlers, middleware, contexts, response writers, and
 - Graceful HTTP shutdown
 - Raw `http.Handler` mounting
 - Standard `httptest` compatibility
+- Project creation, route/config diagnostics, and OpenAPI export through `vial`
 - `vial dev` automatic build-and-restart loop
 - `vial load` bounded HTTP load checks and CI thresholds
 - Last-known-good process remains online after compilation failures
-- No runtime dependencies outside the Go standard library
+- No runtime dependencies in the core HTTP package
 
 ## Examples
 
 1. [`examples/hello`](examples/hello) is the smallest runnable app and
    introduces the development loop.
 2. [`examples/json-api`](examples/json-api) demonstrates JSON binding and
-   errors. The module, task, upload, SSE, config, secure-cookie, CSRF,
+   errors. The module, task, upload, SSE, config, secure-cookie, security, CSRF,
    and template examples each cover one concern.
 3. [`examples/async`](examples/async) demonstrates
    submission, `Prefer: wait`, polling, cancellation, ownership, idempotency,
    readiness, and metrics with the bounded in-memory executor.
-4. [`examples/websocket`](examples/websocket) uses `coder/websocket` through a
+4. [`examples/sse`](examples/sse) uses the bounded `sse.Hub` with a standard
+   EventSource response.
+5. [`examples/websocket`](examples/websocket) uses `coder/websocket` through a
    standard handler with Vial middleware, limits, and graceful shutdown.
-5. [`examples/grpc`](examples/grpc) shares one h2c listener with HTTP routes and
+6. [`examples/grpc`](examples/grpc) shares one h2c listener with HTTP routes and
    demonstrates standard interceptors, TLS, streaming, and graceful shutdown.
-6. [vial-gateway](https://github.com/jrgf/vial-gateway) and
+7. [`examples/observability`](examples/observability) exposes HTTP metrics and
+   correlates request and W3C trace IDs in structured logs.
+8. [`examples/database`](examples/database) wires PostgreSQL lifecycle,
+   readiness, transactions, and embedded migrations.
+9. [`examples/openapi`](examples/openapi) generates and serves an OpenAPI 3.1
+   document from named routes and Go types.
+10. [vial-gateway](https://github.com/jrgf/vial-gateway) and
    [vialboard](https://github.com/jrgf/vialboard) are complete applications.
 
 ## Project status
 
-Vial is pre-1.0. The API freeze is complete, but the project still needs more
-production evidence and a release-candidate cycle. Vial began as a learning
-project and accepts AI-assisted contributions. Those changes go through the
-same tests, review, security reporting, and compatibility policy as any other
-contribution. Read the release notes before using a pre-1.0 version in
-production.
+Vial 1.0.0-rc.1 is a release candidate. Its public API is frozen except for
+correctness and security fixes; stable 1.0 still requires downstream validation
+and production burn-in. Vial began as a learning project and accepts
+AI-assisted contributions. Those changes go
+through the same tests, review, security reporting, and compatibility policy
+as any other contribution. Read the release notes before using a pre-1.0
+version in production.
 
 ## Run it
 
@@ -154,11 +171,28 @@ server := &http.Server{
 api := app.Group("/api")
 api.Use(authenticationMiddleware)
 
-api.Get("/users/{id}", getUser)
+api.Get("/users/{id}", getUser, vial.RouteName("users.get"))
 api.Post("/users", createUser)
 ```
 
 Application middleware wraps all requests, including `404` and `405` responses. Group middleware wraps only endpoints registered through that group.
+
+Use a route name to build a path for a redirect, link, or `Location` header:
+
+```go
+location, err := app.URL("users.get", map[string]string{"id": "A/B"})
+// location is /api/users/A%2FB
+```
+
+`App.URL` validates and freezes registration on its first call. Call it after
+registering all routes, or inside a handler through `context.App().URL`.
+Lookups reuse the immutable named-route index and support concurrent callers.
+Pass raw parameter values. Missing or extra parameters, empty or slash-only
+single segments, and dot segments return errors. `{path...}` preserves slashes,
+permits an empty tail or a trailing slash, and rejects leading or repeated
+slashes. Paths include group
+prefixes and omit hosts, schemes, queries, and fragments. Add query strings with
+`net/url.Values`.
 
 ## Modules
 
@@ -202,6 +236,13 @@ Modules contain application functionality. Extensions provide technical
 infrastructure, such as sessions, databases, telemetry, authentication, task
 supervision, or a gRPC server. Vial does not require an extension interface;
 ordinary constructors and application options remain sufficient.
+
+## Realtime
+
+The [`sse`](sse) package writes events and provides bounded process-local
+fan-out. [`vialws`](vialws) closes coder/websocket connections with the Vial
+request lifecycle. [`vialgrpc`](vialgrpc) mounts grpc-go with message limits and
+bounded graceful shutdown.
 
 ## JSON binding
 
@@ -261,11 +302,12 @@ VIAL_ALLOW_INSECURE_COOKIE=1 vial dev ./examples/web
 
 The insecure-cookie flag is only for local HTTP.
 
-## Signed cookie sessions
+## Encrypted cookie sessions
 
-Vial leaves session policy opt-in. The isolated
-[`examples/securecookie`](examples/securecookie) module demonstrates signed
-sessions, key rotation, and one-time flash messages with `securecookie`:
+The [`session`](session) package provides authenticated and encrypted
+client-side sessions, one-time flash values, secure cookie defaults, and live
+key rotation. The runnable [`examples/securecookie`](examples/securecookie)
+module demonstrates the complete flow:
 
 ```bash
 umask 077
@@ -275,13 +317,89 @@ SESSION_KEYS_FILE=/tmp/vial-session-keys VIAL_ALLOW_INSECURE_COOKIE=1 vial dev .
 
 The example reloads this file every minute and expires sessions after five
 minutes. Rotate with `NEW_KEY,OLD_KEY`, newest first; remove the old key after
-five minutes.
+the longest configured session lifetime.
 
-`VIAL_ALLOW_INSECURE_COOKIE=1` is only for local HTTP. Cookie contents are
-authenticated but not encrypted, so never store secrets in them. `SameSite`
-is defense in depth, not a replacement for CSRF protection.
+`VIAL_ALLOW_INSECURE_COOKIE=1` is only for local HTTP. Sessions are encrypted
+but remain client-side and limited to one cookie. `SameSite` is defense in
+depth, not a replacement for CSRF protection.
+
+## Authentication and authorization
+
+The [`auth`](auth) package resolves an optional identity once per request and
+provides route guards for authentication and application-defined grants. It
+does not own users, passwords, tokens, or an authorization database. The
+[`examples/securecookie`](examples/securecookie) application demonstrates
+session-backed identity resolution with protected `/me` and `/admin` routes.
+
+## Security middleware
+
+`middleware.SecurityHeaders()` adds a restrictive Content Security Policy,
+referrer and framing controls, MIME sniffing protection, and HSTS on direct TLS
+requests. `middleware.RateLimit(...)` provides bounded in-process token buckets
+keyed by `Context.ClientIP()` by default. The runnable
+[`examples/security`](examples/security) application demonstrates both.
+
+Use a gateway or shared store when a limit must span replicas.
+
+## Observability
+
+`middleware.HTTPMetrics` records request counts, active requests, and a fixed
+duration histogram using registered route patterns instead of raw paths.
+`App.UseHTTP` accepts standard `net/http` middleware, including tracing
+libraries. `middleware.TraceContext` adds a validated trace ID to request state
+and structured logs alongside `X-Request-ID`.
+
+The runnable [`examples/observability`](examples/observability) application
+exposes `/metrics` and demonstrates tracing and log correlation.
+
+## Database
+
+The [`sqlkit`](sqlkit) package adds transaction and embedded migration helpers
+to `database/sql`. Existing application hooks own the pool lifecycle:
+
+```go
+app.OnStart(db.PingContext, migrator.Migrate)
+app.OnStop(func(context.Context) error { return db.Close() })
+app.Readiness("/ready", db.PingContext)
+```
+
+`sqlkit.InTx` commits on success and rolls back on errors or panics. `Migrator`
+applies sorted `.sql` files once, stores SHA-256 checksums, and rejects edited
+history. See the runnable
+[`examples/database`](examples/database) PostgreSQL application.
+
+## OpenAPI 3.1
+
+The [`openapi`](openapi) package generates deterministic OpenAPI 3.1 JSON from
+`App.Routes`, `RouteName`, and Go request and response types. It understands
+Vial's `path`, `query`, `header`, `cookie`, `form`, and `json` binding tags.
+
+```go
+err := openapi.Mount(app, "/openapi.json", openapi.Config{
+    Title:   "Notes API",
+    Version: "1.0.0",
+    Operations: map[string]openapi.Operation{
+        "notes.create": {
+            Request: createNoteRequest{},
+            Responses: map[int]openapi.Response{
+                http.StatusCreated: {Body: note{}},
+            },
+        },
+    },
+})
+```
+
+`openapi:"required"` marks documented fields as required; application
+validation remains authoritative. `Operation.RequestSchema` and `Response.Schema`
+accept explicit JSON Schema for custom JSON types, constraints, and examples.
+Embedded fields and `json:",string"` follow Go's JSON encoding rules.
+See the runnable [`examples/openapi`](examples/openapi) application.
 
 ## Testing
+
+Public API suites live in [`tests/`](tests), grouped by package. Private unit
+tests remain beside their source files. `go test ./...` includes both, and
+`make coverage` instruments production packages across the test tree.
 
 `testkit` runs the full application lifecycle and cleans up automatically:
 
@@ -531,6 +649,22 @@ Unexpected errors are rendered as a generic `500` response. Their internal detai
 Unmatched routes and unsupported methods use the same error handler and return
 `not_found` and `method_not_allowed` codes; `405` responses include `Allow`.
 
+Enable [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457.html)
+before building the application:
+
+```go
+app.SetErrorHandler(vial.ProblemDetailsErrorHandler)
+```
+
+Errors then use `application/problem+json` with `type: "about:blank"`, the HTTP
+status and title, a public `detail`, and the existing `code` and optional
+validation `fields` extensions. The renderer preserves `Allow`, `Retry-After`,
+and authentication challenges. Internal causes, fault metadata, and request URLs
+stay out of the response. Explicit `HTTPError.Message` values remain public.
+Applications using the default renderer retain the existing JSON envelope.
+See [`examples/openapi`](examples/openapi) for named `Location` headers, Problem
+Details, and matching response schemas.
+
 ## Mount standard handlers
 
 ```go
@@ -542,13 +676,27 @@ app.HandleHTTP("GET /health", http.HandlerFunc(func(w http.ResponseWriter, _ *ht
 Mount a raw handler for existing middleware, metrics endpoints, profilers, and
 other `net/http` integrations.
 
-## Development runner
+## Command-line workflow
 
 Build the CLI:
 
 ```bash
 go install ./cmd/vial
 ```
+
+Create a minimal service:
+
+```bash
+vial new --module example.com/service ./service
+cd ./service
+go mod tidy
+go run .
+```
+
+The generated service includes liveness, readiness, request IDs, logging,
+panic recovery, security headers, and graceful shutdown.
+
+### Development runner
 
 Usage:
 
@@ -563,6 +711,7 @@ vial dev ./examples/hello
 vial dev --verbose ./cmd/server
 vial dev --debounce 500ms ./cmd/server
 vial dev --exclude generated ./cmd/server
+vial dev --watch '*.html' --watch '*.css' ./examples/web
 vial dev ./cmd/server -- --config ./config/dev.json
 ```
 
@@ -574,15 +723,24 @@ Flags:
 | `--debounce` | `250ms` | Quiet period before rebuilding |
 | `--restart-timeout` | `3s` | Time allowed for graceful child shutdown |
 | `--exclude` | none | Additional ignored name or path; repeatable |
+| `--watch` | none | Additional filename or root-relative path pattern; repeatable |
 | `--verbose` | false | Print each relevant changed path |
 
-The MVP watcher recursively scans:
+The watcher recursively scans these files by default:
 
 - `*.go`
 - `go.mod`
 - `go.sum`
 - `go.work`
 - `go.work.sum`
+
+Use `--watch '*.html'`, `--watch '*.css'`, or `--watch '*.sql'` to rebuild after
+embedded assets change. Patterns without `/` match filenames at any depth;
+patterns with `/`, such as `static/*.css`, match paths relative to `--root`.
+Patterns use Go's `path.Match` syntax: `*` does not cross `/`, and `**` has no
+special meaning. Use forward slashes on every platform and quote patterns to
+prevent shell expansion. Added, modified, and deleted files trigger rebuilds;
+exclusions still take precedence.
 
 It ignores:
 
@@ -609,7 +767,22 @@ Validate configuration and application build setup without starting the server:
 
 ```bash
 vial doctor ./examples/config
+vial doctor --json ./examples/config
+vial config --json ./examples/config
 ```
+
+`config` reports validation only. It never prints application-owned values or
+secrets.
+
+Export the OpenAPI document served by an application without binding a port:
+
+```bash
+vial openapi ./examples/openapi
+vial openapi --output openapi.json ./examples/openapi
+```
+
+The default endpoint is `/openapi.json`; override it with `--path`. Export
+builds the application but does not run startup or shutdown hooks.
 
 Run a bounded load check against a deployed endpoint:
 
@@ -623,10 +796,17 @@ vial load --max-error-rate 1 --max-p95 250ms http://localhost:8080/
 - `vial`, `help`, `--help`, `-h`, and subcommand help exit with status 0.
 - Unknown commands, invalid arguments, runtime failures, and failed load
   thresholds exit with status 1.
+- `vial new --json` writes `directory`, `module`, `go`, and `vial` fields.
 - `vial routes --json` writes an indented JSON array of `vial.Route` values to
   standard output.
+- `vial doctor --json` writes `ok`, `routes`, `named_routes`, and `go` fields.
+- `vial config --json` writes `{"valid": true}` after application construction
+  and route validation succeed.
+- `vial openapi` writes an OpenAPI 3.1 JSON document to standard output or the
+  file selected by `--output`.
 - `vial version --verbose` writes stable `version=`, `commit=`, and `go=` lines
   to standard output.
+- `vial version --json` writes `version`, `commit`, and `go` fields.
 - `vial load` writes its final summary to standard output and progress to
   standard error, keeping redirected summaries clean.
 
@@ -663,9 +843,17 @@ Builds never run concurrently. Changes detected during a build remain queued for
 ├── binding.go             # query, form, multipart, and JSON body limits
 ├── errors.go              # HTTP error model and renderer
 ├── server.go              # server lifecycle and graceful shutdown
-├── middleware/            # request ID, logging, recovery, CORS, and CSRF
+├── auth/                  # request identities and authorization guards
+├── session/               # encrypted client-side cookie sessions
+├── sqlkit/                # database/sql transactions and migrations
+├── openapi/               # OpenAPI 3.1 generation and document handler
+├── sse/                   # bounded Server-Sent Event fan-out
+├── vialws/                # coder/websocket lifecycle adapter
+├── vialgrpc/              # grpc-go lifecycle module
+├── middleware/            # request ID, logging, recovery, browser policy, and rate limits
 ├── internal/dev/          # watcher, builder, runner, and process control
 ├── cmd/vial/              # development and load-check CLI
+├── tests/                 # public API tests, grouped by package
 └── examples/              # runnable applications
 ```
 
@@ -677,12 +865,28 @@ go test -race ./...
 go vet ./...
 ```
 
-The codebase is also compile-checked for Windows and macOS in CI.
+Use the existing protocol client at the integration boundary. Extra Vial
+wrappers would hide behavior that applications need to verify.
+
+| Battery | Supported test path |
+|---|---|
+| HTTP, sessions, authentication, security, observability | `testkit.Start`, `Server.JSON`, `Server.Multipart`, and `RequireRoute` |
+| SSE | `sse.Hub`, `testkit.Start`, `http.Client`, and `bufio.Reader` |
+| WebSocket | `vialws.NewHandler`, `testkit.Start`, and `coder/websocket` |
+| gRPC | `vialgrpc.New`, `testkit.Start`, and the generated grpc-go client |
+| SQL | `database/sql` with a test driver; run database integration tests for the selected production driver |
+| Async operations | In-memory executor tests plus the selected persistent adapter's integration tests |
+| OpenAPI | Generate or fetch JSON, decode it, and assert the documented operation and schema |
+
+The maintained examples under `examples/` are runnable reference tests for
+each row.
+
+CI runs tests on Linux, Windows, and macOS with both supported Go versions.
 
 ## Known limitations
 
 - Development change detection uses recursive polling rather than native filesystem events.
-- Only Go source and module/workspace files trigger rebuilds.
+- Non-Go assets require explicit `--watch` patterns; `go:embed` directives are not discovered automatically.
 - Windows child replacement uses direct termination; graceful console-event delivery is a later enhancement.
 - Route registration becomes immutable after the application is built or first served.
 
