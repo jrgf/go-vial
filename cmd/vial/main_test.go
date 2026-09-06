@@ -457,6 +457,8 @@ func TestRunDevValidatesArguments(t *testing.T) {
 	err := runDev([]string{
 		"--root", missingRoot,
 		"--exclude", "generated",
+		"--watch", "*.html",
+		"--watch", "static/*.css",
 		"--verbose",
 		"./cmd/server",
 		"--",
@@ -464,5 +466,8 @@ func TestRunDevValidatesArguments(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "inspect project root") {
 		t.Fatalf("unexpected root error %v", err)
+	}
+	if err := runDev([]string{"--root", t.TempDir(), "--watch", "["}); err == nil || !strings.Contains(err.Error(), "invalid watch pattern") {
+		t.Fatalf("invalid watch pattern was not reported: %v", err)
 	}
 }

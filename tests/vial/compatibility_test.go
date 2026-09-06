@@ -15,7 +15,7 @@ func TestPublicPackagesFromExternalModule(t *testing.T) {
 	if !ok {
 		t.Fatal("resolve repository root")
 	}
-	root := filepath.Dir(source)
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
 	directory := t.TempDir()
 	goMod := fmt.Sprintf(`module example.com/vial-compatibility
 
@@ -50,6 +50,8 @@ import (
 
 func TestApplication(t *testing.T) {
 	_ = async.NewMemoryExecutor
+	_ = (*vial.App).URL
+	_ = vial.ProblemDetailsErrorHandler
 	_ = asyncpostgres.New
 	_ = openapi.Generate
 	_ = openapi.Handler

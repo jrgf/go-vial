@@ -170,11 +170,28 @@ server := &http.Server{
 api := app.Group("/api")
 api.Use(authenticationMiddleware)
 
-api.Get("/users/{id}", getUser)
+api.Get("/users/{id}", getUser, vial.RouteName("users.get"))
 api.Post("/users", createUser)
 ```
 
 Application middleware wraps all requests, including `404` and `405` responses. Group middleware wraps only endpoints registered through that group.
+
+Use a route name to build a path for a redirect, link, or `Location` header:
+
+```go
+location, err := app.URL("users.get", map[string]string{"id": "A/B"})
+// location is /api/users/A%2FB
+```
+
+`App.URL` validates and freezes registration on its first call. Call it after
+registering all routes, or inside a handler through `context.App().URL`.
+Lookups reuse the immutable named-route index and support concurrent callers.
+Pass raw parameter values. Missing or extra parameters, empty or slash-only
+single segments, and dot segments return errors. `{path...}` preserves slashes,
+permits an empty tail or a
+trailing slash, and rejects leading or repeated slashes. Paths include group
+prefixes and omit hosts, schemes, queries, and fragments. Add query strings with
+`net/url.Values`.
 
 ## Modules
 
@@ -380,10 +397,17 @@ err := openapi.Mount(app, "/openapi.json", openapi.Config{
 ```
 
 `openapi:"required"` marks documented fields as required; application
-validation remains authoritative. See [`docs/openapi.md`](docs/openapi.md) and
+validation remains authoritative. `Operation.RequestSchema` and `Response.Schema`
+accept explicit JSON Schema for custom JSON types, constraints, and examples.
+Embedded fields and `json:",string"` follow Go's JSON encoding rules.
+See [`docs/openapi.md`](docs/openapi.md) and
 the runnable [`examples/openapi`](examples/openapi) application.
 
 ## Testing
+
+Public API suites live in [`tests/`](tests), grouped by package. Private unit
+tests remain beside their source files. `go test ./...` includes both, and
+`make coverage` instruments production packages across the test tree.
 
 `testkit` runs the full application lifecycle and cleans up automatically:
 
@@ -633,6 +657,22 @@ Unexpected errors are rendered as a generic `500` response. Their internal detai
 Unmatched routes and unsupported methods use the same error handler and return
 `not_found` and `method_not_allowed` codes; `405` responses include `Allow`.
 
+Enable [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457.html)
+before building the application:
+
+```go
+app.SetErrorHandler(vial.ProblemDetailsErrorHandler)
+```
+
+Errors then use `application/problem+json` with `type: "about:blank"`, the HTTP
+status and title, a public `detail`, and the existing `code` and optional
+validation `fields` extensions. The renderer preserves `Allow`, `Retry-After`,
+and authentication challenges. Internal causes, fault metadata, and request URLs
+stay out of the response. Explicit `HTTPError.Message` values remain public.
+Applications using the default renderer retain the existing JSON envelope.
+See [`examples/openapi`](examples/openapi) for named `Location` headers, Problem
+Details, and matching response schemas.
+
 ## Mount standard handlers
 
 ```go
@@ -679,6 +719,7 @@ vial dev ./examples/hello
 vial dev --verbose ./cmd/server
 vial dev --debounce 500ms ./cmd/server
 vial dev --exclude generated ./cmd/server
+vial dev --watch '*.html' --watch '*.css' ./examples/web
 vial dev ./cmd/server -- --config ./config/dev.json
 ```
 
@@ -690,15 +731,24 @@ Flags:
 | `--debounce` | `250ms` | Quiet period before rebuilding |
 | `--restart-timeout` | `3s` | Time allowed for graceful child shutdown |
 | `--exclude` | none | Additional ignored name or path; repeatable |
+| `--watch` | none | Additional filename or root-relative path pattern; repeatable |
 | `--verbose` | false | Print each relevant changed path |
 
-The MVP watcher recursively scans:
+The watcher recursively scans these files by default:
 
 - `*.go`
 - `go.mod`
 - `go.sum`
 - `go.work`
 - `go.work.sum`
+
+Use `--watch '*.html'`, `--watch '*.css'`, or `--watch '*.sql'` to rebuild after
+embedded assets change. Patterns without `/` match filenames at any depth;
+patterns with `/`, such as `static/*.css`, match paths relative to `--root`.
+Patterns use Go's `path.Match` syntax: `*` does not cross `/`, and `**` has no
+special meaning. Use forward slashes on every platform and quote patterns to
+prevent shell expansion. Added, modified, and deleted files trigger rebuilds;
+exclusions still take precedence.
 
 It ignores:
 
@@ -843,7 +893,7 @@ The codebase is also compile-checked for Windows and macOS in CI.
 ## Known limitations
 
 - Development change detection uses recursive polling rather than native filesystem events.
-- Only Go source and module/workspace files trigger rebuilds.
+- Non-Go assets require explicit `--watch` patterns; `go:embed` directives are not discovered automatically.
 - Windows child replacement uses direct termination; graceful console-event delivery is a later enhancement.
 - Route registration becomes immutable after the application is built or first served.
 

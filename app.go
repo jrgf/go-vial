@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type requestContextKey struct{}
@@ -44,10 +45,12 @@ func (writer *routeMissWriter) Write(body []byte) (int, error) {
 
 // App is the framework application and implements http.Handler.
 type App struct {
-	mu sync.RWMutex
+	mu    sync.RWMutex
+	built atomic.Bool
 
 	config         config
 	routes         []routeDefinition
+	namedRoutes    map[string]Route
 	modules        []string
 	middleware     []Middleware
 	httpMiddleware []HTTPMiddleware
@@ -279,12 +282,11 @@ func (app *App) Build() error {
 	}
 
 	dispatch := func(contextValue *Context) error {
-		requestContext := context.WithValue(
-			contextValue.request.Context(),
-			requestContextKey{},
-			contextValue,
-		)
-		contextValue.request = contextValue.request.WithContext(requestContext)
+		// Middleware may replace the request context. Reattach only when needed.
+		if current, _ := ContextFromRequest(contextValue.request); current != contextValue {
+			requestContext := context.WithValue(contextValue.request.Context(), requestContextKey{}, contextValue)
+			contextValue.request = contextValue.request.WithContext(requestContext)
+		}
 		if err := routeMiss(mux, contextValue.request); err != nil {
 			return err
 		}
@@ -293,19 +295,24 @@ func (app *App) Build() error {
 	}
 
 	compiled := chain(dispatch, app.middleware...)
-	app.compiledRoot = func(contextValue *Context) error {
-		_, pattern := mux.Handler(contextValue.request)
-		if route, ok := matchedRoutes[pattern]; ok {
-			matched := route
-			contextValue.route = &matched
+	app.compiledRoot = compiled
+	if len(app.middleware) > 0 {
+		app.compiledRoot = func(contextValue *Context) error {
+			_, pattern := mux.Handler(contextValue.request)
+			if route, ok := matchedRoutes[pattern]; ok {
+				matched := route
+				contextValue.route = &matched
+			}
+			return compiled(contextValue)
 		}
-		return compiled(contextValue)
 	}
 	app.compiledHTTP = chainHTTP(http.HandlerFunc(app.serveHTTP), app.httpMiddleware...)
 	if app.compiledHTTP == nil {
 		app.buildErr = fmt.Errorf("standard HTTP middleware returned a nil handler")
 		return app.buildErr
 	}
+	app.namedRoutes = names
+	app.built.Store(true)
 	return nil
 }
 
@@ -356,10 +363,12 @@ func routeMiss(mux *http.ServeMux, request *http.Request) *HTTPError {
 
 // ServeHTTP implements http.Handler and builds the application on first use.
 func (app *App) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	if err := app.Build(); err != nil {
-		app.config.logger.Error("framework build failed", "error", err)
-		http.Error(writer, "framework initialization failed", http.StatusInternalServerError)
-		return
+	if !app.built.Load() {
+		if err := app.Build(); err != nil {
+			app.config.logger.Error("framework build failed", "error", err)
+			http.Error(writer, "framework initialization failed", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	app.compiledHTTP.ServeHTTP(writer, request)

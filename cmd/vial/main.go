@@ -200,12 +200,13 @@ func runDev(arguments []string) error {
 	flags := flag.NewFlagSet("vial dev", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 
-	var excludes stringList
+	var excludes, watchPatterns stringList
 	root := flags.String("root", "", "project root to watch and build from")
 	debounce := flags.Duration("debounce", dev.DefaultDebounce, "source-change debounce duration")
 	restartTimeout := flags.Duration("restart-timeout", dev.DefaultRestartTimeout, "graceful child shutdown timeout")
 	verbose := flags.Bool("verbose", false, "print every relevant changed path")
 	flags.Var(&excludes, "exclude", "additional directory or path to ignore; repeatable")
+	flags.Var(&watchPatterns, "watch", "additional filename or root-relative path pattern to watch; repeatable")
 
 	flags.Usage = func() {
 		_, _ = fmt.Fprintln(flags.Output(), "Usage: vial dev [flags] [package] [-- application arguments]")
@@ -237,6 +238,7 @@ func runDev(arguments []string) error {
 		Debounce:       *debounce,
 		RestartTimeout: *restartTimeout,
 		Excludes:       excludes,
+		WatchPatterns:  watchPatterns,
 		Verbose:        *verbose,
 	})
 	if err != nil {

@@ -48,6 +48,9 @@ Do not commit generated files from `bin/`, `.vial/`, coverage profiles, editor s
 - The CLI build
 
 Tests should verify observable behavior instead of private implementation details. Bug fixes should include a test that fails without the fix. Platform-specific changes must continue to compile on Linux, macOS, and Windows.
+Put public API tests in `tests/<package>`. Tests that require unexported symbols
+stay beside their source. Run `make coverage` to include coverage from both
+locations; the command uses `-coverpkg=./...`.
 
 Run `go mod tidy -diff` when changing module dependencies.
 

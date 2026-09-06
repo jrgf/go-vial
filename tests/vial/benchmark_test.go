@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -183,4 +184,63 @@ func benchmarkRequests(b *testing.B, app *vial.App, method, path string, body []
 			b.Fatalf("status = %d, want %d", response.Code, wantStatus)
 		}
 	}
+}
+
+// BenchmarkDispatch isolates concurrent handler overhead from request parsing
+// and response recording. Each worker owns its request and response writer.
+func BenchmarkDispatch(b *testing.B) {
+	for _, framework := range []string{"Vial", "net_http"} {
+		b.Run(framework, func(b *testing.B) {
+			var handler http.Handler
+			if framework == "Vial" {
+				app := vial.New()
+				app.Get("/users/{id}", func(c *vial.Context) error {
+					return c.Text(http.StatusOK, c.Param("id"))
+				})
+				if err := app.Build(); err != nil {
+					b.Fatal(err)
+				}
+				handler = app
+			} else {
+				mux := http.NewServeMux()
+				mux.HandleFunc("GET /users/{id}", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+					w.WriteHeader(http.StatusOK)
+					_, _ = io.WriteString(w, r.PathValue("id"))
+				})
+				handler = mux
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				request := httptest.NewRequest(http.MethodGet, "/users/42", nil)
+				response := &dispatchResponse{header: make(http.Header)}
+				for pb.Next() {
+					clear(response.header)
+					response.status, response.bytes = 0, 0
+					handler.ServeHTTP(response, request)
+					if response.status != http.StatusOK || response.bytes != 2 {
+						b.Fatalf("response: status=%d bytes=%d", response.status, response.bytes)
+					}
+				}
+			})
+		})
+	}
+}
+
+type dispatchResponse struct {
+	header http.Header
+	status int
+	bytes  int
+}
+
+func (w *dispatchResponse) Header() http.Header    { return w.header }
+func (w *dispatchResponse) WriteHeader(status int) { w.status = status }
+func (w *dispatchResponse) Write(p []byte) (int, error) {
+	w.bytes += len(p)
+	return len(p), nil
+}
+func (w *dispatchResponse) WriteString(s string) (int, error) {
+	w.bytes += len(s)
+	return len(s), nil
 }

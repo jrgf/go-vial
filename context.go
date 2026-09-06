@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-type requestValuesContextKey struct{}
 type stringRequestValueKey string
 
 type requestValues struct {
@@ -25,6 +24,9 @@ type requestValues struct {
 
 func (values *requestValues) set(key, value any) {
 	values.mu.Lock()
+	if values.values == nil {
+		values.values = make(map[any]any)
+	}
 	values.values[key] = value
 	values.mu.Unlock()
 }
@@ -60,7 +62,7 @@ func (key *ValueKey[T]) Set(context *Context, value T) {
 
 // Get returns a typed value from a Vial context.
 func (key *ValueKey[T]) Get(context *Context) (T, bool) {
-	return requestValue[T](context.values, key)
+	return requestValue[T](&context.values, key)
 }
 
 // FromRequest returns the same typed value through the underlying request.
@@ -69,11 +71,11 @@ func (key *ValueKey[T]) FromRequest(request *http.Request) (T, bool) {
 	if request == nil {
 		return zero, false
 	}
-	values, ok := request.Context().Value(requestValuesContextKey{}).(*requestValues)
-	if !ok || values == nil {
+	context, ok := ContextFromRequest(request)
+	if !ok {
 		return zero, false
 	}
-	return requestValue[T](values, key)
+	return requestValue[T](&context.values, key)
 }
 
 func requestValue[T any](values *requestValues, key *ValueKey[T]) (T, bool) {
@@ -103,22 +105,21 @@ type Context struct {
 	afterHooks  []func()
 	finished    bool
 
-	values *requestValues
+	values requestValues
 }
 
 func newContext(app *App, writer *ResponseWriter, request *http.Request) *Context {
-	values := &requestValues{values: make(map[any]any)}
-	request = request.WithContext(stdcontext.WithValue(request.Context(), requestValuesContextKey{}, values))
-	return &Context{
+	context := &Context{
 		app:      app,
 		request:  request,
 		response: writer,
 		logger:   app.config.logger,
-		values:   values,
 	}
+	context.request = request.WithContext(stdcontext.WithValue(request.Context(), requestContextKey{}, context))
+	return context
 }
 
-// ContextFromRequest returns the Vial context attached to a routed request.
+// ContextFromRequest returns the Vial context attached by the application.
 // It lets standard net/http handlers access route metadata without exported
 // context keys that could collide with application values.
 func ContextFromRequest(request *http.Request) (*Context, bool) {

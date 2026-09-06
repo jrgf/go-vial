@@ -10,7 +10,7 @@ test:
 
 coverage:
 	mkdir -p $(dir $(COVERAGE_PROFILE))
-	go test -coverprofile=$(COVERAGE_PROFILE) ./...
+	go test -coverpkg=./... -coverprofile=$(COVERAGE_PROFILE) ./...
 	@go tool cover -func=$(COVERAGE_PROFILE) | awk -v min="$(COVERAGE_MIN)" '/^total:/ { found=1; gsub(/%/, "", $$3); printf "coverage: %.1f%% (minimum %.1f%%)\n", $$3, min; if ($$3 + 0 < min) failed=1 } END { exit (!found || failed) }'
 
 race:
@@ -23,9 +23,10 @@ examples:
 	cd examples/securecookie && go test ./...
 	cd examples/websocket && go test ./...
 	cd examples/grpc && go test ./...
+	cd examples/database && go test -run '^$$' ./...
 
 benchmark:
-	go test -run '^$$' -bench '^BenchmarkHTTP$$' -benchmem -count=5 .
+	go test -run '^$$' -bench '^BenchmarkHTTP$$' -benchmem -count=5 ./tests/vial
 
 build:
 	mkdir -p $(dir $(VIAL_BIN))

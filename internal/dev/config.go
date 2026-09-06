@@ -20,6 +20,7 @@ type Config struct {
 	Debounce       time.Duration
 	RestartTimeout time.Duration
 	Excludes       []string
+	WatchPatterns  []string
 	Verbose        bool
 	Stdin          io.Reader
 	Stdout         io.Writer

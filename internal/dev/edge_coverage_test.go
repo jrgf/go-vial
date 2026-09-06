@@ -97,7 +97,7 @@ func TestCoverageInjectedSystemErrors(t *testing.T) {
 	}
 	killProcess = originalKill
 
-	newSourceWatcher = func(string, []string) (*Watcher, error) { return nil, want }
+	newSourceWatcher = func(string, []string, ...string) (*Watcher, error) { return nil, want }
 	if _, err := NewRunner(Config{Root: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard}); !errors.Is(err, want) {
 		t.Fatalf("watcher creation error = %v", err)
 	}

@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"bytes"
 	"context"
 	"encoding"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	vial "github.com/jrgf/go-vial"
 )
@@ -23,6 +25,7 @@ const openAPIVersion = "3.1.0"
 
 var (
 	textMarshalerType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
+	jsonMarshalerType = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 	timeType          = reflect.TypeOf(time.Time{})
 	rawMessageType    = reflect.TypeOf(json.RawMessage{})
 	supportedMethods  = map[string]bool{
@@ -50,10 +53,13 @@ type Config struct {
 // Operation adds documentation to a named Vial route. Nil Security inherits
 // Config.Security; an empty non-nil slice marks the operation as public.
 type Operation struct {
-	Summary            string
-	Description        string
-	Tags               []string
-	Request            any
+	Summary     string
+	Description string
+	Tags        []string
+	Request     any
+	// RequestSchema replaces inferred body metadata with a JSON Schema object
+	// or boolean. It does not change runtime binding or validation.
+	RequestSchema      json.RawMessage
 	RequestContentType string
 	RequestRequired    bool
 	Responses          map[int]Response
@@ -65,6 +71,8 @@ type Operation struct {
 type Response struct {
 	Description string
 	Body        any
+	// Schema replaces the inferred body schema, including for custom marshalers.
+	Schema      json.RawMessage
 	ContentType string
 }
 
@@ -273,15 +281,15 @@ func describeRequest(route vial.Route, operation Operation) ([]any, map[string]a
 			"schema": map[string]any{"type": "string"},
 		})
 	}
-	if operation.Request == nil {
+	if operation.Request == nil && len(operation.RequestSchema) == 0 {
 		return parameters, nil, nil
 	}
 
 	requestType := reflect.TypeOf(operation.Request)
-	for requestType.Kind() == reflect.Pointer {
+	for requestType != nil && requestType.Kind() == reflect.Pointer {
 		requestType = requestType.Elem()
 	}
-	if requestType.Kind() == reflect.Struct {
+	if requestType != nil && requestType.Kind() == reflect.Struct {
 		for index := 0; index < requestType.NumField(); index++ {
 			field := requestType.Field(index)
 			if !field.IsExported() {
@@ -318,12 +326,16 @@ func describeRequest(route vial.Route, operation Operation) ([]any, map[string]a
 	if contentType == "" {
 		contentType = "application/json"
 	}
-	bodySchema, present, err := requestSchema(requestType, contentType)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !present {
-		return parameters, nil, nil
+	var bodySchema any = operation.RequestSchema
+	if len(operation.RequestSchema) == 0 {
+		inferred, present, err := requestSchema(requestType, contentType)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !present {
+			return parameters, nil, nil
+		}
+		bodySchema = inferred
 	}
 	requestBody := map[string]any{
 		"content": map[string]any{contentType: map[string]any{"schema": bodySchema}},
@@ -344,24 +356,48 @@ func requestSchema(requestType reflect.Type, contentType string) (map[string]any
 		return nil, false, fmt.Errorf("invalid request content type %q", contentType)
 	}
 	form := mediaType == "application/x-www-form-urlencoded" || mediaType == "multipart/form-data"
+	if !form && (hasMarshaler(requestType, jsonMarshalerType) || hasMarshaler(requestType, textMarshalerType)) {
+		schema, err := schemaFor(requestType, make(map[reflect.Type]bool))
+		return schema, true, err
+	}
 	properties := make(map[string]any)
 	required := make([]string, 0)
-	for index := 0; index < requestType.NumField(); index++ {
-		field := requestType.Field(index)
-		if !field.IsExported() {
-			continue
-		}
-		name, include := requestFieldName(field, form)
-		if !include {
-			continue
-		}
-		schema, err := schemaFor(field.Type, make(map[reflect.Type]bool))
+	if !form {
+		fields, err := jsonFields(requestType)
 		if err != nil {
-			return nil, false, fmt.Errorf("request field %s: %w", field.Name, err)
+			return nil, false, err
 		}
-		properties[name] = schema
-		if requiredField(field) {
-			required = append(required, name)
+		for _, field := range fields {
+			if _, include := requestFieldName(requestType.Field(field.field.Index[0]), false); !include {
+				continue
+			}
+			schema, err := jsonFieldSchema(field.field, make(map[reflect.Type]bool))
+			if err != nil {
+				return nil, false, fmt.Errorf("request field %s: %w", field.name, err)
+			}
+			properties[field.name] = schema
+			if requiredField(field.field) {
+				required = append(required, field.name)
+			}
+		}
+	} else {
+		for index := 0; index < requestType.NumField(); index++ {
+			field := requestType.Field(index)
+			if !field.IsExported() {
+				continue
+			}
+			name, include := requestFieldName(field, form)
+			if !include {
+				continue
+			}
+			schema, err := schemaFor(field.Type, make(map[reflect.Type]bool))
+			if err != nil {
+				return nil, false, fmt.Errorf("request field %s: %w", field.Name, err)
+			}
+			properties[name] = schema
+			if requiredField(field) {
+				required = append(required, name)
+			}
 		}
 	}
 	if len(properties) == 0 {
@@ -381,7 +417,7 @@ func requestFieldName(field reflect.StructField, form bool) (string, bool) {
 	}
 	jsonTag, hasJSONTag := field.Tag.Lookup("json")
 	name := tagName(jsonTag)
-	if name == "-" {
+	if jsonTag == "-" {
 		return "", false
 	}
 	explicit := false
@@ -418,9 +454,11 @@ func describeResponses(configured map[int]Response) (map[string]any, error) {
 			}
 		}
 		response := map[string]any{"description": description}
-		if configuredResponse.Body != nil || configuredResponse.ContentType != "" {
-			schema := map[string]any{}
-			if configuredResponse.Body != nil {
+		if configuredResponse.Body != nil || configuredResponse.ContentType != "" || len(configuredResponse.Schema) > 0 {
+			var schema any = map[string]any{}
+			if len(configuredResponse.Schema) > 0 {
+				schema = configuredResponse.Schema
+			} else if configuredResponse.Body != nil {
 				var err error
 				schema, err = schemaFor(reflect.TypeOf(configuredResponse.Body), make(map[reflect.Type]bool))
 				if err != nil {
@@ -441,6 +479,118 @@ func describeResponses(configured map[int]Response) (map[string]any, error) {
 	return responses, nil
 }
 
+type jsonField struct {
+	name   string
+	field  reflect.StructField
+	tagged bool
+}
+
+// jsonFields follows encoding/json promotion and dominance rules, rather than
+// Go's field visibility rules, which do not account for JSON names or tags.
+func jsonFields(valueType reflect.Type) ([]jsonField, error) {
+	var fields []jsonField
+	visiting := make(map[reflect.Type]bool)
+	var collect func(reflect.Type, []int) error
+	collect = func(current reflect.Type, parent []int) error {
+		if visiting[current] {
+			return nil
+		}
+		visiting[current] = true
+		defer delete(visiting, current)
+		for index := 0; index < current.NumField(); index++ {
+			field := current.Field(index)
+			underlying := field.Type
+			if underlying.Kind() == reflect.Pointer {
+				underlying = underlying.Elem()
+			}
+			if !field.IsExported() && (!field.Anonymous || underlying.Kind() != reflect.Struct) {
+				continue
+			}
+			tag := field.Tag.Get("json")
+			if tag == "-" {
+				continue
+			}
+			name := tagName(tag)
+			for _, char := range name {
+				if !strings.ContainsRune(" !#$%&()*+-./:;<=>?@[]^_{|}~", char) && !unicode.IsLetter(char) && !unicode.IsDigit(char) {
+					// Reserved tag characters have different fallback behavior
+					// across supported Go versions; do not guess a wire name.
+					return fmt.Errorf("field %s has a nonportable JSON tag %q; use a valid tag or an explicit body schema", field.Name, tag)
+				}
+			}
+			field.Index = append(slices.Clone(parent), index)
+			if field.Anonymous && name == "" && underlying.Kind() == reflect.Struct {
+				if err := collect(underlying, field.Index); err != nil {
+					return err
+				}
+				continue
+			}
+			tagged := name != ""
+			if name == "" {
+				name = field.Name
+			}
+			fields = append(fields, jsonField{name: name, field: field, tagged: tagged})
+		}
+		return nil
+	}
+	if err := collect(valueType, nil); err != nil {
+		return nil, err
+	}
+	slices.SortFunc(fields, func(a, b jsonField) int {
+		if order := strings.Compare(a.name, b.name); order != 0 {
+			return order
+		}
+		if depth := len(a.field.Index) - len(b.field.Index); depth != 0 {
+			return depth
+		}
+		if a.tagged != b.tagged {
+			if a.tagged {
+				return -1
+			}
+			return 1
+		}
+		return 0
+	})
+	selected := fields[:0]
+	for index := 0; index < len(fields); {
+		end := index + 1
+		for end < len(fields) && fields[end].name == fields[index].name {
+			end++
+		}
+		first := fields[index]
+		if end == index+1 || len(first.field.Index) < len(fields[index+1].field.Index) || first.tagged != fields[index+1].tagged {
+			selected = append(selected, first)
+		}
+		index = end
+	}
+	slices.SortFunc(selected, func(a, b jsonField) int { return slices.Compare(a.field.Index, b.field.Index) })
+	return selected, nil
+}
+
+func hasMarshaler(valueType, marshalerType reflect.Type) bool {
+	return valueType.Implements(marshalerType) || reflect.PointerTo(valueType).Implements(marshalerType)
+}
+
+func jsonFieldSchema(field reflect.StructField, visiting map[reflect.Type]bool) (map[string]any, error) {
+	_, options, _ := strings.Cut(field.Tag.Get("json"), ",")
+	valueType := field.Type
+	if valueType.Name() == "" && valueType.Kind() == reflect.Pointer {
+		valueType = valueType.Elem()
+	}
+	if slices.Contains(strings.Split(options, ","), "string") && !hasMarshaler(field.Type, jsonMarshalerType) {
+		switch valueType.Kind() {
+		case reflect.Bool, reflect.String, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float32, reflect.Float64:
+			schema := map[string]any{"type": "string"}
+			if field.Type.Kind() == reflect.Pointer {
+				return map[string]any{"anyOf": []any{schema, map[string]any{"type": "null"}}}, nil
+			}
+			return schema, nil
+		}
+	}
+	return schemaFor(field.Type, visiting)
+}
+
 func schemaFor(valueType reflect.Type, visiting map[reflect.Type]bool) (map[string]any, error) {
 	if valueType == nil {
 		return map[string]any{}, nil
@@ -458,7 +608,12 @@ func schemaFor(valueType reflect.Type, visiting map[reflect.Type]bool) (map[stri
 	if valueType == rawMessageType {
 		return map[string]any{}, nil
 	}
-	if valueType.Implements(textMarshalerType) || reflect.PointerTo(valueType).Implements(textMarshalerType) {
+	if hasMarshaler(valueType, jsonMarshalerType) {
+		// A custom marshaler can emit any JSON value. An explicit schema can
+		// describe its contract without executing application code here.
+		return map[string]any{}, nil
+	}
+	if hasMarshaler(valueType, textMarshalerType) {
 		return map[string]any{"type": "string"}, nil
 	}
 
@@ -471,7 +626,7 @@ func schemaFor(valueType reflect.Type, visiting map[reflect.Type]bool) (map[stri
 		return map[string]any{"type": "integer", "format": "int32"}, nil
 	case reflect.Int64:
 		return map[string]any{"type": "integer", "format": "int64"}, nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		return map[string]any{"type": "integer", "minimum": 0}, nil
 	case reflect.Float32:
 		return map[string]any{"type": "number", "format": "float"}, nil
@@ -503,25 +658,18 @@ func schemaFor(valueType reflect.Type, visiting map[reflect.Type]bool) (map[stri
 		defer delete(visiting, valueType)
 		properties := make(map[string]any)
 		required := make([]string, 0)
-		for index := 0; index < valueType.NumField(); index++ {
-			field := valueType.Field(index)
-			if !field.IsExported() {
-				continue
-			}
-			name := tagName(field.Tag.Get("json"))
-			if name == "-" {
-				continue
-			}
-			if name == "" {
-				name = field.Name
-			}
-			property, err := schemaFor(field.Type, visiting)
+		fields, err := jsonFields(valueType)
+		if err != nil {
+			return nil, err
+		}
+		for _, field := range fields {
+			property, err := jsonFieldSchema(field.field, visiting)
 			if err != nil {
-				return nil, fmt.Errorf("field %s: %w", field.Name, err)
+				return nil, fmt.Errorf("field %s: %w", field.name, err)
 			}
-			properties[name] = property
-			if requiredField(field) {
-				required = append(required, name)
+			properties[field.name] = property
+			if requiredField(field.field) {
+				required = append(required, field.name)
 			}
 		}
 		schema := map[string]any{"type": "object", "properties": properties}
@@ -589,7 +737,10 @@ func validateConfig(config Config) error {
 		if strings.TrimSpace(name) == "" {
 			return errors.New("openapi: operation route name is required")
 		}
-		if operation.Request == nil && operation.RequestContentType != "" {
+		if err := validateSchema(operation.RequestSchema); err != nil {
+			return fmt.Errorf("openapi: operation %q request schema: %w", name, err)
+		}
+		if operation.Request == nil && len(operation.RequestSchema) == 0 && operation.RequestContentType != "" {
 			return fmt.Errorf("openapi: operation %q sets a content type without a request", name)
 		}
 		if operation.RequestContentType != "" {
@@ -598,6 +749,9 @@ func validateConfig(config Config) error {
 			}
 		}
 		for status, response := range operation.Responses {
+			if err := validateSchema(response.Schema); err != nil {
+				return fmt.Errorf("openapi: operation %q response %d schema: %w", name, status, err)
+			}
 			if status < 100 || status > 599 {
 				return fmt.Errorf("openapi: operation %q has invalid response status %d", name, status)
 			}
@@ -676,12 +830,28 @@ func cloneConfig(config Config) Config {
 	clone.SecuritySchemes = maps.Clone(config.SecuritySchemes)
 	clone.Operations = make(map[string]Operation, len(config.Operations))
 	for name, operation := range config.Operations {
+		operation.RequestSchema = slices.Clone(operation.RequestSchema)
 		operation.Tags = slices.Clone(operation.Tags)
 		operation.Security = cloneRequirements(operation.Security)
 		operation.Responses = maps.Clone(operation.Responses)
+		for status, response := range operation.Responses {
+			response.Schema = slices.Clone(response.Schema)
+			operation.Responses[status] = response
+		}
 		clone.Operations[name] = operation
 	}
 	return clone
+}
+
+func validateSchema(schema json.RawMessage) error {
+	if schema == nil {
+		return nil
+	}
+	trimmed := bytes.TrimSpace(schema)
+	if !json.Valid(schema) || (trimmed[0] != '{' && !bytes.Equal(trimmed, []byte("true")) && !bytes.Equal(trimmed, []byte("false"))) {
+		return errors.New("expected a JSON Schema object or boolean")
+	}
+	return nil
 }
 
 func cloneRequirements(requirements []SecurityRequirement) []SecurityRequirement {

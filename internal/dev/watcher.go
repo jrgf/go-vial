@@ -2,9 +2,12 @@ package dev
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -37,9 +40,10 @@ type Watcher struct {
 	stopped  chan struct{}
 	close    sync.Once
 	snapshot map[string]fileFingerprint
+	patterns []string
 }
 
-func NewWatcher(root string, excludes []string) (*Watcher, error) {
+func NewWatcher(root string, excludes []string, patterns ...string) (*Watcher, error) {
 	absoluteRoot, err := makeAbsolute(root)
 	if err != nil {
 		return nil, err
@@ -53,6 +57,13 @@ func NewWatcher(root string, excludes []string) (*Watcher, error) {
 		errors:   make(chan error, 8),
 		done:     make(chan struct{}),
 		stopped:  make(chan struct{}),
+	}
+	for _, pattern := range patterns {
+		pattern = strings.TrimPrefix(strings.TrimSpace(pattern), "./")
+		if _, err := path.Match(pattern, ""); err != nil || pattern == "" || strings.HasPrefix(pattern, "/") || slices.Contains(strings.Split(pattern, "/"), "..") {
+			return nil, fmt.Errorf("invalid watch pattern %q: use a relative path or filename pattern", pattern)
+		}
+		watcher.patterns = append(watcher.patterns, pattern)
 	}
 
 	watcher.snapshot, err = watcher.scan()
@@ -134,7 +145,7 @@ func (watcher *Watcher) scan() (map[string]fileFingerprint, error) {
 			}
 			return nil
 		}
-		if watcher.ignore.Match(path) || !isRelevantSource(path) {
+		if watcher.ignore.Match(path) || !watcher.relevant(path) {
 			return nil
 		}
 
@@ -156,6 +167,30 @@ func (watcher *Watcher) scan() (map[string]fileFingerprint, error) {
 		return nil, err
 	}
 	return snapshot, nil
+}
+
+func (watcher *Watcher) relevant(filename string) bool {
+	if isRelevantSource(filename) {
+		return true
+	}
+	if len(watcher.patterns) == 0 {
+		return false
+	}
+	relative, err := filepath.Rel(watcher.root, filename)
+	if err != nil {
+		return false
+	}
+	relative = filepath.ToSlash(relative)
+	for _, pattern := range watcher.patterns {
+		name := relative
+		if !strings.Contains(pattern, "/") {
+			name = filepath.Base(filename)
+		}
+		if matched, _ := path.Match(pattern, name); matched {
+			return true
+		}
+	}
+	return false
 }
 
 func (watcher *Watcher) reportChange(path string) {

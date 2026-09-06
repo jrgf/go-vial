@@ -66,6 +66,17 @@ func (writer *ResponseWriter) Write(data []byte) (int, error) {
 	return written, err
 }
 
+// WriteString writes text without converting it to bytes when the underlying
+// writer supports io.StringWriter, while tracking commitment and byte counts.
+func (writer *ResponseWriter) WriteString(value string) (int, error) {
+	if !writer.wroteHeader {
+		writer.WriteHeader(http.StatusOK)
+	}
+	written, err := io.WriteString(writer.ResponseWriter, value)
+	writer.bytes += int64(written)
+	return written, err
+}
+
 // Status returns the written status or 200 before commitment.
 func (writer *ResponseWriter) Status() int {
 	if writer.status == 0 {
@@ -159,94 +170,94 @@ func preserveResponseWriterCapabilities(writer *ResponseWriter) http.ResponseWri
 	case 1:
 		return struct {
 			*ResponseWriter
-			http.Flusher
+			responseFlusher
 		}{writer, flush}
 	case 2:
 		return struct {
 			*ResponseWriter
-			http.Hijacker
+			responseHijacker
 		}{writer, hijack}
 	case 3:
 		return struct {
 			*ResponseWriter
-			http.Flusher
-			http.Hijacker
+			responseFlusher
+			responseHijacker
 		}{writer, flush, hijack}
 	case 4:
 		return struct {
 			*ResponseWriter
-			io.ReaderFrom
+			responseReaderFrom
 		}{writer, read}
 	case 5:
 		return struct {
 			*ResponseWriter
-			http.Flusher
-			io.ReaderFrom
+			responseFlusher
+			responseReaderFrom
 		}{writer, flush, read}
 	case 6:
 		return struct {
 			*ResponseWriter
-			http.Hijacker
-			io.ReaderFrom
+			responseHijacker
+			responseReaderFrom
 		}{writer, hijack, read}
 	case 7:
 		return struct {
 			*ResponseWriter
-			http.Flusher
-			http.Hijacker
-			io.ReaderFrom
+			responseFlusher
+			responseHijacker
+			responseReaderFrom
 		}{writer, flush, hijack, read}
 	case 8:
 		return struct {
 			*ResponseWriter
-			http.Pusher
+			responsePusher
 		}{writer, push}
 	case 9:
 		return struct {
 			*ResponseWriter
-			http.Flusher
-			http.Pusher
+			responseFlusher
+			responsePusher
 		}{writer, flush, push}
 	case 10:
 		return struct {
 			*ResponseWriter
-			http.Hijacker
-			http.Pusher
+			responseHijacker
+			responsePusher
 		}{writer, hijack, push}
 	case 11:
 		return struct {
 			*ResponseWriter
-			http.Flusher
-			http.Hijacker
-			http.Pusher
+			responseFlusher
+			responseHijacker
+			responsePusher
 		}{writer, flush, hijack, push}
 	case 12:
 		return struct {
 			*ResponseWriter
-			io.ReaderFrom
-			http.Pusher
+			responseReaderFrom
+			responsePusher
 		}{writer, read, push}
 	case 13:
 		return struct {
 			*ResponseWriter
-			http.Flusher
-			io.ReaderFrom
-			http.Pusher
+			responseFlusher
+			responseReaderFrom
+			responsePusher
 		}{writer, flush, read, push}
 	case 14:
 		return struct {
 			*ResponseWriter
-			http.Hijacker
-			io.ReaderFrom
-			http.Pusher
+			responseHijacker
+			responseReaderFrom
+			responsePusher
 		}{writer, hijack, read, push}
 	case 15:
 		return struct {
 			*ResponseWriter
-			http.Flusher
-			http.Hijacker
-			io.ReaderFrom
-			http.Pusher
+			responseFlusher
+			responseHijacker
+			responseReaderFrom
+			responsePusher
 		}{writer, flush, hijack, read, push}
 	default:
 		return writer
