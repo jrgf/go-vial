@@ -70,9 +70,10 @@ batteries may use focused dependencies.
 
 ## Project status
 
-Vial is pre-1.0. The core API audit is complete, while the first-party battery
-APIs are still being shaped before the release-candidate freeze. Vial began as
-a learning project and accepts AI-assisted contributions. Those changes go
+Vial 1.0.0-rc.1 is a release candidate. Its public API is frozen except for
+correctness and security fixes; stable 1.0 still requires downstream validation
+and production burn-in. Vial began as a learning project and accepts
+AI-assisted contributions. Those changes go
 through the same tests, review, security reporting, and compatibility policy
 as any other contribution. Read the release notes before using a pre-1.0
 version in production.
@@ -188,8 +189,8 @@ registering all routes, or inside a handler through `context.App().URL`.
 Lookups reuse the immutable named-route index and support concurrent callers.
 Pass raw parameter values. Missing or extra parameters, empty or slash-only
 single segments, and dot segments return errors. `{path...}` preserves slashes,
-permits an empty tail or a
-trailing slash, and rejects leading or repeated slashes. Paths include group
+permits an empty tail or a trailing slash, and rejects leading or repeated
+slashes. Paths include group
 prefixes and omit hosts, schemes, queries, and fragments. Add query strings with
 `net/url.Values`.
 
@@ -241,8 +242,7 @@ ordinary constructors and application options remain sufficient.
 The [`sse`](sse) package writes events and provides bounded process-local
 fan-out. [`vialws`](vialws) closes coder/websocket connections with the Vial
 request lifecycle. [`vialgrpc`](vialgrpc) mounts grpc-go with message limits and
-bounded graceful shutdown. Deployment limits and examples are in
-[`docs/realtime.md`](docs/realtime.md).
+bounded graceful shutdown.
 
 ## JSON binding
 
@@ -321,8 +321,7 @@ the longest configured session lifetime.
 
 `VIAL_ALLOW_INSECURE_COOKIE=1` is only for local HTTP. Sessions are encrypted
 but remain client-side and limited to one cookie. `SameSite` is defense in
-depth, not a replacement for CSRF protection. See
-[`docs/sessions.md`](docs/sessions.md) for the API and deployment rules.
+depth, not a replacement for CSRF protection.
 
 ## Authentication and authorization
 
@@ -332,9 +331,6 @@ does not own users, passwords, tokens, or an authorization database. The
 [`examples/securecookie`](examples/securecookie) application demonstrates
 session-backed identity resolution with protected `/me` and `/admin` routes.
 
-See [`docs/authentication.md`](docs/authentication.md) for middleware ordering,
-401/403 behavior, and integration guidance.
-
 ## Security middleware
 
 `middleware.SecurityHeaders()` adds a restrictive Content Security Policy,
@@ -343,9 +339,7 @@ requests. `middleware.RateLimit(...)` provides bounded in-process token buckets
 keyed by `Context.ClientIP()` by default. The runnable
 [`examples/security`](examples/security) application demonstrates both.
 
-Use a gateway or shared store when a limit must span replicas. See
-[`docs/security.md`](docs/security.md) for proxy, HSTS, key-capacity, and CSP
-guidance.
+Use a gateway or shared store when a limit must span replicas.
 
 ## Observability
 
@@ -356,8 +350,7 @@ libraries. `middleware.TraceContext` adds a validated trace ID to request state
 and structured logs alongside `X-Request-ID`.
 
 The runnable [`examples/observability`](examples/observability) application
-exposes `/metrics`. See [`docs/observability.md`](docs/observability.md) for
-tracer integration, metric names, middleware order, and deployment guidance.
+exposes `/metrics` and demonstrates tracing and log correlation.
 
 ## Database
 
@@ -372,7 +365,7 @@ app.Readiness("/ready", db.PingContext)
 
 `sqlkit.InTx` commits on success and rolls back on errors or panics. `Migrator`
 applies sorted `.sql` files once, stores SHA-256 checksums, and rejects edited
-history. See [`docs/database.md`](docs/database.md) and the runnable
+history. See the runnable
 [`examples/database`](examples/database) PostgreSQL application.
 
 ## OpenAPI 3.1
@@ -400,8 +393,7 @@ err := openapi.Mount(app, "/openapi.json", openapi.Config{
 validation remains authoritative. `Operation.RequestSchema` and `Response.Schema`
 accept explicit JSON Schema for custom JSON types, constraints, and examples.
 Embedded fields and `json:",string"` follow Go's JSON encoding rules.
-See [`docs/openapi.md`](docs/openapi.md) and
-the runnable [`examples/openapi`](examples/openapi) application.
+See the runnable [`examples/openapi`](examples/openapi) application.
 
 ## Testing
 
@@ -861,6 +853,7 @@ Builds never run concurrently. Changes detected during a build remain queued for
 ├── middleware/            # request ID, logging, recovery, browser policy, and rate limits
 ├── internal/dev/          # watcher, builder, runner, and process control
 ├── cmd/vial/              # development and load-check CLI
+├── tests/                 # public API tests, grouped by package
 └── examples/              # runnable applications
 ```
 
@@ -888,7 +881,7 @@ wrappers would hide behavior that applications need to verify.
 The maintained examples under `examples/` are runnable reference tests for
 each row.
 
-The codebase is also compile-checked for Windows and macOS in CI.
+CI runs tests on Linux, Windows, and macOS with both supported Go versions.
 
 ## Known limitations
 
