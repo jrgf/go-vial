@@ -82,3 +82,11 @@ merging.
 ## License
 
 By contributing, you agree that your contribution is licensed under the repository's MIT License.
+# Integration module releases
+
+The `vialgrpc` and `vialws` directories are separate Go modules. Their module
+versions use directory-prefixed tags, such as `vialgrpc/v1.0.0-rc.1` and
+`vialws/v1.0.0-rc.1`. The existing release workflow publishes the root module
+and CLI. Release integration modules separately after their required core
+version is available. Local `replace` directives let `make check` test all three
+modules together without publishing them.

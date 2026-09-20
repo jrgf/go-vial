@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
-	"sync"
 )
 
 const (
@@ -32,7 +31,14 @@ func InTx(ctx context.Context, database *sql.DB, options *sql.TxOptions, fn func
 	if fn == nil {
 		return errors.New("sqlkit: nil transaction function")
 	}
+	return inTx(ctx, database, options, fn)
+}
 
+type transactionStarter interface {
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+}
+
+func inTx(ctx context.Context, database transactionStarter, options *sql.TxOptions, fn func(*sql.Tx) error) (err error) {
 	transaction, err := database.BeginTx(ctx, options)
 	if err != nil {
 		return fmt.Errorf("sqlkit: begin transaction: %w", err)
@@ -58,19 +64,31 @@ func InTx(ctx context.Context, database *sql.DB, options *sql.TxOptions, fn func
 
 // Migrator applies embedded .sql files in filename order.
 type Migrator struct {
-	mu       sync.Mutex
 	database *sql.DB
 	source   fs.FS
+	dialect  Dialect
 }
 
 // NewMigrator creates a forward-only migrator rooted at directory in source.
 // Pass "." or an empty directory when source already points at the migrations.
-func NewMigrator(database *sql.DB, source fs.FS, directory string) (*Migrator, error) {
+// PostgreSQL is the default dialect. Pass MySQL for its session locking syntax.
+// Other engines must use a migration tool supporting their locking semantics.
+func NewMigrator(database *sql.DB, source fs.FS, directory string, dialects ...Dialect) (*Migrator, error) {
 	if database == nil {
 		return nil, errors.New("sqlkit: nil database")
 	}
 	if source == nil {
 		return nil, errors.New("sqlkit: nil migration source")
+	}
+	dialect := PostgreSQL
+	if len(dialects) > 1 {
+		return nil, errors.New("sqlkit: expected at most one dialect")
+	}
+	if len(dialects) == 1 {
+		dialect = dialects[0]
+	}
+	if dialect != PostgreSQL && dialect != MySQL {
+		return nil, fmt.Errorf("sqlkit: unsupported migration dialect %q", dialect)
 	}
 	if directory == "" {
 		directory = "."
@@ -83,12 +101,13 @@ func NewMigrator(database *sql.DB, source fs.FS, directory string) (*Migrator, e
 	if err != nil {
 		return nil, fmt.Errorf("sqlkit: open migration directory %q: %w", directory, err)
 	}
-	return &Migrator{database: database, source: root}, nil
+	return &Migrator{database: database, source: root, dialect: dialect}, nil
 }
 
 // Migrate applies unapplied migrations. Changing an applied file returns an
-// error. Each file runs in its own transaction.
-func (migrator *Migrator) Migrate(ctx context.Context) error {
+// error. A database session lock serializes migration runs across processes.
+// Each file runs in its own transaction; MySQL DDL may commit implicitly.
+func (migrator *Migrator) Migrate(ctx context.Context) (err error) {
 	if ctx == nil {
 		return errors.New("sqlkit: nil context")
 	}
@@ -96,13 +115,28 @@ func (migrator *Migrator) Migrate(ctx context.Context) error {
 		return errors.New("sqlkit: nil migrator")
 	}
 
-	migrator.mu.Lock()
-	defer migrator.mu.Unlock()
+	connection, err := migrator.database.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("sqlkit: acquire migration connection: %w", err)
+	}
+	defer func() {
+		if closeErr := connection.Close(); closeErr != nil && !errors.Is(closeErr, sql.ErrConnDone) {
+			err = errors.Join(err, fmt.Errorf("sqlkit: close migration connection: %w", closeErr))
+		}
+	}()
+	unlock, err := migrator.lock(ctx, connection)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, unlock()) }()
+	return migrator.migrate(ctx, connection)
+}
 
-	if _, err := migrator.database.ExecContext(ctx, createMigrationsTable); err != nil {
+func (migrator *Migrator) migrate(ctx context.Context, connection *sql.Conn) error {
+	if _, err := connection.ExecContext(ctx, createMigrationsTable); err != nil {
 		return fmt.Errorf("sqlkit: create migrations table: %w", err)
 	}
-	applied, err := migrator.applied(ctx)
+	applied, err := migrator.applied(ctx, connection)
 	if err != nil {
 		return err
 	}
@@ -133,7 +167,7 @@ func (migrator *Migrator) Migrate(ctx context.Context) error {
 			continue
 		}
 
-		if err := InTx(ctx, migrator.database, nil, func(transaction *sql.Tx) error {
+		if err := inTx(ctx, connection, nil, func(transaction *sql.Tx) error {
 			// ponytail: send each file as one driver call; use one statement per
 			// file when a driver does not accept SQL scripts.
 			if _, err := transaction.ExecContext(ctx, string(contents)); err != nil {
@@ -155,8 +189,8 @@ func (migrator *Migrator) Migrate(ctx context.Context) error {
 	return nil
 }
 
-func (migrator *Migrator) applied(ctx context.Context) (map[string]string, error) {
-	rows, err := migrator.database.QueryContext(ctx, selectMigrations)
+func (migrator *Migrator) applied(ctx context.Context, connection *sql.Conn) (map[string]string, error) {
+	rows, err := connection.QueryContext(ctx, selectMigrations)
 	if err != nil {
 		return nil, fmt.Errorf("sqlkit: list applied migrations: %w", err)
 	}

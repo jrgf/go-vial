@@ -76,8 +76,8 @@ func (metrics *HTTPMetrics) Handler(context *vial.Context) error {
 
 	snapshot := metrics.snapshot()
 	var body strings.Builder
-	body.WriteString("# HELP vial_http_requests_total Completed HTTP requests.\n")
-	body.WriteString("# TYPE vial_http_requests_total counter\n")
+	body.WriteString("# HELP vial_http_requests Completed HTTP requests.\n")
+	body.WriteString("# TYPE vial_http_requests counter\n")
 	for _, item := range snapshot {
 		fmt.Fprintf(&body, "vial_http_requests_total%s %d\n", metricLabels(item.key), item.series.requests)
 	}

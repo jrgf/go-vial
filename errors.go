@@ -166,27 +166,36 @@ func renderHTTPError(context *Context, err error, problemDetails bool) {
 		context.Logger().Error("request failed", "error", err)
 	}
 
-	details := map[string]any{"code": mapped.code}
-	if len(mapped.fields) > 0 {
-		details["fields"] = mapped.fields
-	}
-	var body any = details
+	var body any
 	contentType := "application/json; charset=utf-8"
 	if problemDetails {
-		details["type"] = "about:blank"
-		details["status"] = mapped.status
-		details["detail"] = mapped.message
-		if title := http.StatusText(mapped.status); title != "" {
-			details["title"] = title
-		}
+		body = problemResponse{Type: "about:blank", Status: mapped.status, Detail: mapped.message, Title: http.StatusText(mapped.status), Code: mapped.code, Fields: mapped.fields}
 		contentType = "application/problem+json"
 	} else {
-		details["message"] = mapped.message
-		body = map[string]any{"error": details}
+		body = errorResponse{Error: errorDetails{Code: mapped.code, Message: mapped.message, Fields: mapped.fields}}
 	}
 	context.response.Header().Set("Content-Type", contentType)
 	context.response.WriteHeader(mapped.status)
 	_ = json.NewEncoder(context.response).Encode(body)
+}
+
+type errorDetails struct {
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Fields  map[string]string `json:"fields,omitempty"`
+}
+
+type errorResponse struct {
+	Error errorDetails `json:"error"`
+}
+
+type problemResponse struct {
+	Type   string            `json:"type"`
+	Status int               `json:"status"`
+	Title  string            `json:"title,omitempty"`
+	Detail string            `json:"detail"`
+	Code   string            `json:"code"`
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 type mappedHTTPError struct {

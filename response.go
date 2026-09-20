@@ -15,6 +15,7 @@ type ResponseWriter struct {
 	status            int
 	bytes             int64
 	wroteHeader       bool
+	hijacked          bool
 	committing        bool
 	beforeCommitHooks []func(http.Header)
 }
@@ -28,6 +29,10 @@ func newResponseWriter(writer http.ResponseWriter) *ResponseWriter {
 // WriteHeader records and writes the first response status.
 func (writer *ResponseWriter) WriteHeader(status int) {
 	if writer.wroteHeader || writer.committing {
+		return
+	}
+	if status >= 100 && status < 200 && status != http.StatusSwitchingProtocols {
+		writer.ResponseWriter.WriteHeader(status)
 		return
 	}
 	writer.runBeforeCommitHooks()
@@ -101,23 +106,31 @@ func (writer *ResponseWriter) Unwrap() http.ResponseWriter {
 }
 
 type responseFlusher struct {
-	writer  *ResponseWriter
-	flusher http.Flusher
+	writer *ResponseWriter
 }
 
 func (flusher responseFlusher) Flush() {
+	_ = flusher.FlushError()
+}
+
+func (flusher responseFlusher) FlushError() error {
 	if !flusher.writer.wroteHeader {
 		flusher.writer.WriteHeader(http.StatusOK)
 	}
-	flusher.flusher.Flush()
+	return http.NewResponseController(flusher.writer.ResponseWriter).Flush()
 }
 
 type responseHijacker struct {
+	writer   *ResponseWriter
 	hijacker http.Hijacker
 }
 
 func (hijacker responseHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return hijacker.hijacker.Hijack()
+	conn, buffer, err := hijacker.hijacker.Hijack()
+	if err == nil {
+		hijacker.writer.hijacked = true
+	}
+	return conn, buffer, err
 }
 
 type responsePusher struct {
@@ -144,10 +157,29 @@ func (readerFrom responseReaderFrom) ReadFrom(reader io.Reader) (int64, error) {
 
 func preserveResponseWriterCapabilities(writer *ResponseWriter) http.ResponseWriter {
 	underlying := writer.ResponseWriter
-	flusher, hasFlusher := underlying.(http.Flusher)
+	_, hasFlusher := underlying.(http.Flusher)
 	hijacker, hasHijacker := underlying.(http.Hijacker)
 	readerFrom, hasReaderFrom := underlying.(io.ReaderFrom)
 	pusher, hasPusher := underlying.(http.Pusher)
+	for current := underlying; current != nil; {
+		if _, ok := current.(http.Flusher); ok {
+			hasFlusher = true
+		}
+		if _, ok := current.(interface{ FlushError() error }); ok {
+			hasFlusher = true
+		}
+		if !hasHijacker {
+			hijacker, hasHijacker = current.(http.Hijacker)
+		}
+		if !hasPusher {
+			pusher, hasPusher = current.(http.Pusher)
+		}
+		unwrapper, ok := current.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			break
+		}
+		current = unwrapper.Unwrap()
+	}
 	mask := 0
 	if hasFlusher {
 		mask |= 1
@@ -162,8 +194,8 @@ func preserveResponseWriterCapabilities(writer *ResponseWriter) http.ResponseWri
 		mask |= 8
 	}
 
-	flush := responseFlusher{writer: writer, flusher: flusher}
-	hijack := responseHijacker{hijacker: hijacker}
+	flush := responseFlusher{writer: writer}
+	hijack := responseHijacker{writer: writer, hijacker: hijacker}
 	read := responseReaderFrom{writer: writer, readerFrom: readerFrom}
 	push := responsePusher{pusher: pusher}
 	switch mask {

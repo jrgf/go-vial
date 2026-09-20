@@ -59,7 +59,8 @@ func NewWatcher(root string, excludes []string, patterns ...string) (*Watcher, e
 		stopped:  make(chan struct{}),
 	}
 	for _, pattern := range patterns {
-		pattern = strings.TrimPrefix(strings.TrimSpace(pattern), "./")
+		pattern = strings.ReplaceAll(filepath.ToSlash(strings.TrimSpace(pattern)), `\`, "/")
+		pattern = strings.TrimPrefix(pattern, "./")
 		if _, err := path.Match(pattern, ""); err != nil || pattern == "" || strings.HasPrefix(pattern, "/") || slices.Contains(strings.Split(pattern, "/"), "..") {
 			return nil, fmt.Errorf("invalid watch pattern %q: use a relative path or filename pattern", pattern)
 		}
@@ -186,7 +187,12 @@ func (watcher *Watcher) relevant(filename string) bool {
 		if !strings.Contains(pattern, "/") {
 			name = filepath.Base(filename)
 		}
-		if matched, _ := path.Match(pattern, name); matched {
+		matched, err := path.Match(pattern, name)
+		if err != nil {
+			watcher.reportError(fmt.Errorf("match watch pattern %q: %w", pattern, err))
+			continue
+		}
+		if matched {
 			return true
 		}
 	}

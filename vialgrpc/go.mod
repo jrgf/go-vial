@@ -1,10 +1,9 @@
-module github.com/jrgf/go-vial/examples/grpc
+module github.com/jrgf/go-vial/vialgrpc
 
 go 1.26.6
 
 require (
 	github.com/jrgf/go-vial v1.0.0-rc.1
-	github.com/jrgf/go-vial/vialgrpc v0.0.0
 	google.golang.org/grpc v1.83.2
 )
 
@@ -16,6 +15,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/jrgf/go-vial => ../..
-
-replace github.com/jrgf/go-vial/vialgrpc => ../../vialgrpc
+replace github.com/jrgf/go-vial => ..

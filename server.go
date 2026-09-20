@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/signal"
@@ -60,7 +59,7 @@ func (app *App) Run(contextValue context.Context, address string) error {
 
 func (app *App) writeHTTPInspection(contextValue context.Context, path, output string) error {
 	parsed, err := url.ParseRequestURI(path)
-	if err != nil || parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.ContainsAny(path, " \t\r\n#") {
 		return fmt.Errorf("inspect HTTP path %q: invalid path", path)
 	}
 	if err := app.Build(); err != nil {
@@ -69,16 +68,38 @@ func (app *App) writeHTTPInspection(contextValue context.Context, path, output s
 	if contextValue == nil {
 		contextValue = context.Background()
 	}
-	request := httptest.NewRequest(http.MethodGet, path, nil).WithContext(contextValue)
-	response := httptest.NewRecorder()
-	app.ServeHTTP(response, request)
-	if response.Code < http.StatusOK || response.Code >= http.StatusMultipleChoices {
-		return fmt.Errorf("inspect GET %s: status %d", path, response.Code)
+	request, err := http.NewRequestWithContext(contextValue, http.MethodGet, "http://localhost"+path, nil)
+	if err != nil {
+		return fmt.Errorf("inspect HTTP path %q: invalid path: %w", path, err)
 	}
-	if err := os.WriteFile(output, response.Body.Bytes(), 0o600); err != nil {
+	request.RequestURI = path
+	request.RemoteAddr = "127.0.0.1:0"
+	response := &inspectionResponse{header: make(http.Header)}
+	app.ServeHTTP(response, request)
+	if response.status < http.StatusOK || response.status >= http.StatusMultipleChoices {
+		return fmt.Errorf("inspect GET %s: status %d", path, response.status)
+	}
+	if err := os.WriteFile(output, []byte(response.body.String()), 0o600); err != nil {
 		return fmt.Errorf("write HTTP inspection: %w", err)
 	}
 	return nil
+}
+
+type inspectionResponse struct {
+	header http.Header
+	status int
+	body   strings.Builder
+}
+
+func (response *inspectionResponse) Header() http.Header { return response.header }
+func (response *inspectionResponse) WriteHeader(status int) {
+	if response.status == 0 && (status >= 200 || status == http.StatusSwitchingProtocols) {
+		response.status = status
+	}
+}
+func (response *inspectionResponse) Write(data []byte) (int, error) {
+	response.WriteHeader(http.StatusOK)
+	return response.body.Write(data)
 }
 
 // Serve runs the application on an existing listener. This is useful for tests

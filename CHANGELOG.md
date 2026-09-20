@@ -1,9 +1,6 @@
 # Changelog
 
-## Unreleased
-
 ## 1.0.0-rc.1
-
 - Add `App.URL` for named-route paths with group prefixes, escaped parameters,
   and wildcard validation, using the existing index built during registration.
 - Add opt-in RFC 9457 Problem Details through `ProblemDetailsErrorHandler`,
@@ -47,6 +44,7 @@
 - Add bounded SSE fan-out with isolated topics, lifecycle-aware coder/websocket
   handlers, and a grpc-go module with message limits and bounded graceful
   shutdown.
+- Correctness issues fixed
 
 ## 0.18.0
 - gRPC,SSE,Websockets examples

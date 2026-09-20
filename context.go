@@ -99,6 +99,8 @@ type Context struct {
 	response    *ResponseWriter
 	route       *Route
 	routeErr    error
+	responseErr error
+	match       muxMatch
 	logger      *slog.Logger
 	bodyLimited bool
 	afterMu     sync.Mutex
@@ -254,6 +256,12 @@ func (context *Context) Get(key string) (any, bool) {
 // Status returns the response status written so far.
 func (context *Context) Status() int {
 	return context.response.Status()
+}
+
+// ResponseError returns the handler error or escaping panic, available in
+// AfterResponse hooks. An uncommitted panic is reported with status 500.
+func (context *Context) ResponseError() error {
+	return context.responseErr
 }
 
 // BytesWritten returns the response body bytes written so far.

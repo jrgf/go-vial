@@ -13,30 +13,15 @@ import (
 const generatedGoVersion = "1.26.6"
 
 func runConfig(arguments []string, output io.Writer) error {
-	// ponytail: application config is arbitrary, so this command validates it
-	// without exposing secrets; applications can add their own redacted view.
-	frameworkArguments, applicationArguments := splitApplicationArguments(arguments)
-	flags := flag.NewFlagSet("vial config", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	jsonOutput := flags.Bool("json", false, "print the result as JSON")
-	flags.Usage = func() {
-		_, _ = fmt.Fprintln(flags.Output(), "Usage: vial config [--json] [package] [-- application arguments]")
-		flags.PrintDefaults()
-	}
-	if err := flags.Parse(frameworkArguments); err != nil {
-		return err
-	}
-	if flags.NArg() > 1 {
-		return fmt.Errorf("expected at most one Go package, received %d", flags.NArg())
-	}
-	target := "."
-	if flags.NArg() == 1 {
-		target = flags.Arg(0)
+	// Validate application configuration without printing its secrets.
+	target, applicationArguments, jsonOutput, err := parseInspectionArguments("config", arguments)
+	if err != nil {
+		return fmt.Errorf("inspect configuration: %w", err)
 	}
 	if _, err := inspectApplication(target, applicationArguments); err != nil {
 		return err
 	}
-	if *jsonOutput {
+	if jsonOutput {
 		return writeJSON(output, map[string]bool{"valid": true})
 	}
 	if _, err := fmt.Fprintln(output, "vial config: ok"); err != nil {

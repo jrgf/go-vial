@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"text/tabwriter"
@@ -25,6 +26,7 @@ var (
 	commit               = "development"
 	buildGoVersion       string
 	loadProgressInterval = time.Second
+	inspectionTimeout    = 10 * time.Second
 )
 
 const (
@@ -277,30 +279,15 @@ func runRoutes(arguments []string, output io.Writer) error {
 }
 
 func runDoctor(arguments []string, output io.Writer) error {
-	frameworkArguments, applicationArguments := splitApplicationArguments(arguments)
-	flags := flag.NewFlagSet("vial doctor", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	jsonOutput := flags.Bool("json", false, "print diagnostics as JSON")
-	flags.Usage = func() {
-		_, _ = fmt.Fprintln(flags.Output(), "Usage: vial doctor [--json] [package] [-- application arguments]")
-		flags.PrintDefaults()
-	}
-	if err := flags.Parse(frameworkArguments); err != nil {
+	target, applicationArguments, jsonOutput, err := parseInspectionArguments("doctor", arguments)
+	if err != nil {
 		return err
-	}
-	if flags.NArg() > 1 {
-		return fmt.Errorf("expected at most one Go package, received %d", flags.NArg())
-	}
-
-	target := "."
-	if flags.NArg() == 1 {
-		target = flags.Arg(0)
 	}
 	routes, err := inspectApplication(target, applicationArguments)
 	if err != nil {
 		return err
 	}
-	if *jsonOutput {
+	if jsonOutput {
 		named := 0
 		for _, route := range routes {
 			if route.Name != "" {
@@ -318,6 +305,28 @@ func runDoctor(arguments []string, output io.Writer) error {
 		return fmt.Errorf("write doctor result: %w", err)
 	}
 	return nil
+}
+
+func parseInspectionArguments(name string, arguments []string) (string, []string, bool, error) {
+	frameworkArguments, applicationArguments := splitApplicationArguments(arguments)
+	flags := flag.NewFlagSet("vial "+name, flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	jsonOutput := flags.Bool("json", false, "print the result as JSON")
+	flags.Usage = func() {
+		_, _ = fmt.Fprintf(flags.Output(), "Usage: vial %s [--json] [package] [-- application arguments]\n", name)
+		flags.PrintDefaults()
+	}
+	if err := flags.Parse(frameworkArguments); err != nil {
+		return "", nil, false, fmt.Errorf("parse %s arguments: %w", name, err)
+	}
+	if flags.NArg() > 1 {
+		return "", nil, false, fmt.Errorf("expected at most one Go package, received %d", flags.NArg())
+	}
+	target := "."
+	if flags.NArg() == 1 {
+		target = flags.Arg(0)
+	}
+	return target, applicationArguments, *jsonOutput, nil
 }
 
 func inspectApplication(target string, applicationArguments []string) ([]vial.Route, error) {
@@ -347,8 +356,25 @@ func inspectOutput(target string, applicationArguments []string, outputEnvironme
 		return nil, fmt.Errorf("close inspection output: %w", err)
 	}
 
-	commandArguments := append([]string{"run", resolvedTarget}, applicationArguments...)
-	command := exec.Command("go", commandArguments...)
+	buildDirectory, err := os.MkdirTemp("", "vial-inspect-build-*")
+	if err != nil {
+		return nil, fmt.Errorf("create inspection build directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(buildDirectory) }()
+	executable := filepath.Join(buildDirectory, "application.exe")
+	buildContext, cancelBuild := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelBuild()
+	build := exec.CommandContext(buildContext, "go", "build", "-o", executable, resolvedTarget)
+	build.Dir, build.Stdout, build.Stderr = workingDirectory, os.Stderr, os.Stderr
+	build.WaitDelay = time.Second
+	if err := build.Run(); err != nil {
+		return nil, fmt.Errorf("inspect application build: %w", err)
+	}
+
+	inspectContext, cancel := context.WithTimeout(context.Background(), inspectionTimeout)
+	defer cancel()
+	command := exec.CommandContext(inspectContext, executable, applicationArguments...)
+	command.WaitDelay = time.Second
 	command.Dir = workingDirectory
 	command.Env = inspectionEnvironment(os.Environ())
 	command.Env = append(command.Env, outputEnvironment+"="+outputPath)
@@ -357,6 +383,9 @@ func inspectOutput(target string, applicationArguments []string, outputEnvironme
 	command.Stdout = os.Stderr
 	command.Stderr = os.Stderr
 	if err := command.Run(); err != nil {
+		if inspectContext.Err() != nil {
+			return nil, fmt.Errorf("inspect application timed out after %s; update the application's Vial library to support inspection: %w", inspectionTimeout, inspectContext.Err())
+		}
 		return nil, fmt.Errorf("inspect application: %w", err)
 	}
 

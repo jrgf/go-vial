@@ -3,12 +3,7 @@ package sse
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -31,109 +26,6 @@ const (
 	// DropEvent keeps the subscriber and drops the new event for that subscriber.
 	DropEvent
 )
-
-// Event is one Server-Sent Event.
-type Event struct {
-	// ID identifies the event for Last-Event-ID reconnection.
-	ID string
-	// Name selects the browser event type. An empty name dispatches "message".
-	Name string
-	// Retry asks the client to wait this long before reconnecting.
-	Retry time.Duration
-	// Data is copied for each subscriber by Hub.Publish.
-	Data []byte
-}
-
-// JSON creates an event whose data is a JSON value.
-func JSON(name string, value any) (Event, error) {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return Event{}, fmt.Errorf("encode SSE JSON: %w", err)
-	}
-	event := Event{Name: name, Data: data}
-	if err := validateEvent(event); err != nil {
-		return Event{}, err
-	}
-	return event, nil
-}
-
-// WriteEvent writes one complete event, including its terminating blank line.
-func WriteEvent(writer io.Writer, event Event) error {
-	if writer == nil {
-		return errors.New("sse: writer cannot be nil")
-	}
-	if err := validateEvent(event); err != nil {
-		return err
-	}
-
-	var buffer bytes.Buffer
-	if event.ID != "" {
-		fmt.Fprintf(&buffer, "id: %s\n", event.ID)
-	}
-	if event.Name != "" {
-		fmt.Fprintf(&buffer, "event: %s\n", event.Name)
-	}
-	if event.Retry > 0 {
-		fmt.Fprintf(&buffer, "retry: %d\n", max(int64(1), event.Retry.Milliseconds()))
-	}
-	writeLines(&buffer, "data", event.Data)
-	buffer.WriteByte('\n')
-	return writeAll(writer, buffer.Bytes())
-}
-
-// WriteComment writes one comment block. Comments are commonly used as
-// heartbeats because browsers do not dispatch them as events.
-func WriteComment(writer io.Writer, comment string) error {
-	if writer == nil {
-		return errors.New("sse: writer cannot be nil")
-	}
-	var buffer bytes.Buffer
-	writeLines(&buffer, ":", []byte(comment))
-	buffer.WriteByte('\n')
-	return writeAll(writer, buffer.Bytes())
-}
-
-func validateEvent(event Event) error {
-	if strings.ContainsAny(event.ID, "\r\n\x00") {
-		return errors.New("sse: event ID cannot contain a newline or NUL byte")
-	}
-	if strings.ContainsAny(event.Name, "\r\n") {
-		return errors.New("sse: event name cannot contain a newline")
-	}
-	if event.Retry < 0 {
-		return errors.New("sse: retry cannot be negative")
-	}
-	return nil
-}
-
-func writeLines(buffer *bytes.Buffer, field string, value []byte) {
-	value = bytes.ReplaceAll(value, []byte("\r\n"), []byte("\n"))
-	value = bytes.ReplaceAll(value, []byte("\r"), []byte("\n"))
-	for line := range bytes.SplitSeq(value, []byte("\n")) {
-		if field == ":" {
-			buffer.WriteByte(':')
-			if len(line) > 0 {
-				buffer.WriteByte(' ')
-			}
-		} else {
-			buffer.WriteString(field)
-			buffer.WriteString(": ")
-		}
-		buffer.Write(line)
-		buffer.WriteByte('\n')
-	}
-}
-
-func writeAll(writer io.Writer, data []byte) error {
-	written, err := writer.Write(data)
-	if err != nil {
-		return fmt.Errorf("write SSE event: %w", err)
-	}
-	if written != len(data) {
-		return fmt.Errorf("write SSE event: %w", io.ErrShortWrite)
-	}
-	return nil
-}
 
 // HubConfig configures a Hub.
 type HubConfig struct {
@@ -160,7 +52,7 @@ type Hub struct {
 type subscriber struct {
 	topic  string
 	events chan Event
-	done   chan struct{}
+	stop   func() bool
 }
 
 // NewHub creates a bounded event hub.
@@ -211,11 +103,9 @@ func (hub *Hub) SubscribeTopic(contextValue context.Context, topic string) <-cha
 	subscription := &subscriber{
 		topic:  topic,
 		events: make(chan Event, hub.buffer),
-		done:   make(chan struct{}),
 	}
 	if contextValue.Err() != nil {
 		close(subscription.events)
-		close(subscription.done)
 		return subscription.events
 	}
 
@@ -223,22 +113,14 @@ func (hub *Hub) SubscribeTopic(contextValue context.Context, topic string) <-cha
 	if hub.subscribers == nil {
 		hub.mu.Unlock()
 		close(subscription.events)
-		close(subscription.done)
 		return subscription.events
 	}
 	if hub.subscribers[topic] == nil {
 		hub.subscribers[topic] = make(map[*subscriber]struct{})
 	}
 	hub.subscribers[topic][subscription] = struct{}{}
+	subscription.stop = context.AfterFunc(contextValue, func() { hub.remove(subscription) })
 	hub.mu.Unlock()
-
-	go func() {
-		select {
-		case <-contextValue.Done():
-			hub.remove(subscription)
-		case <-subscription.done:
-		}
-	}()
 	return subscription.events
 }
 
@@ -284,7 +166,7 @@ func (hub *Hub) Close() {
 	}
 	for _, subscriptions := range hub.subscribers {
 		for subscription := range subscriptions {
-			close(subscription.done)
+			subscription.stop()
 			close(subscription.events)
 		}
 	}
@@ -306,50 +188,6 @@ func (hub *Hub) disconnectLocked(subscription *subscriber) {
 	if len(subscriptions) == 0 {
 		delete(hub.subscribers, subscription.topic)
 	}
-	close(subscription.done)
+	subscription.stop()
 	close(subscription.events)
-}
-
-// Handler returns an HTTP event-stream handler. It subscribes each request to
-// the hub, emits heartbeat comments, flushes every block, and stops on request
-// cancellation.
-func (hub *Hub) Handler() http.Handler {
-	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		controller := http.NewResponseController(writer)
-		setDeadline := func() bool {
-			err := controller.SetWriteDeadline(time.Now().Add(hub.writeTimeout))
-			return err == nil || errors.Is(err, http.ErrNotSupported)
-		}
-		if !setDeadline() {
-			http.Error(writer, "stream unavailable", http.StatusInternalServerError)
-			return
-		}
-
-		header := writer.Header()
-		header.Set("Content-Type", "text/event-stream")
-		header.Set("Cache-Control", "no-cache")
-		header.Set("X-Content-Type-Options", "nosniff")
-		writer.WriteHeader(http.StatusOK)
-		if err := controller.Flush(); err != nil {
-			return
-		}
-
-		events := hub.Subscribe(request.Context())
-		heartbeat := time.NewTicker(hub.heartbeat)
-		defer heartbeat.Stop()
-		for {
-			select {
-			case <-request.Context().Done():
-				return
-			case event, open := <-events:
-				if !open || !setDeadline() || WriteEvent(writer, event) != nil || controller.Flush() != nil {
-					return
-				}
-			case <-heartbeat.C:
-				if !setDeadline() || WriteComment(writer, "heartbeat") != nil || controller.Flush() != nil {
-					return
-				}
-			}
-		}
-	})
 }

@@ -39,11 +39,14 @@ type rateLimiter struct {
 	burst       int
 	maxKeys     int
 	buckets     map[string]rateLimitBucket
+	overflow    rateLimitBucket
 	nextCleanup time.Time
 }
 
 // RateLimit creates bounded, process-local rate-limiting middleware. The
-// default key is Context.ClientIP, including its trusted-proxy policy.
+// default key is Context.ClientIP, grouping IPv6 addresses by /64 and honoring
+// trusted proxies. At MaxKeys, new keys share one overflow bucket until space
+// becomes available. Use a custom Key for authenticated identities.
 func RateLimit(config RateLimitConfig) (vial.Middleware, error) {
 	limiter, key, err := newRateLimiter(config)
 	if err != nil {
@@ -102,6 +105,11 @@ func newRateLimiter(config RateLimitConfig) (*rateLimiter, func(*vial.Context) (
 			if err != nil {
 				return "", vial.BadRequest("invalid_client_address", "The client address is invalid")
 			}
+			address = address.Unmap()
+			if address.Is6() {
+				prefix, _ := address.Prefix(64)
+				return prefix.String(), nil
+			}
 			return address.String(), nil
 		}
 	}
@@ -121,10 +129,11 @@ func (limiter *rateLimiter) allow(key string, now time.Time) (bool, time.Duratio
 
 	limiter.cleanup(now)
 	bucket, exists := limiter.buckets[key]
-	if !exists {
-		if len(limiter.buckets) >= limiter.maxKeys {
-			return false, max(limiter.nextCleanup.Sub(now), time.Second)
-		}
+	shared := !exists && len(limiter.buckets) >= limiter.maxKeys
+	if shared {
+		bucket = limiter.overflow
+	}
+	if bucket.updated.IsZero() {
 		bucket = rateLimitBucket{tokens: float64(limiter.burst), updated: now}
 	}
 
@@ -133,14 +142,19 @@ func (limiter *rateLimiter) allow(key string, now time.Time) (bool, time.Duratio
 		bucket.tokens = min(float64(limiter.burst), bucket.tokens+refill)
 	}
 	bucket.updated = now
-	bucket.seen = now
-	if bucket.tokens >= 1 {
+	allowed := bucket.tokens >= 1
+	if allowed {
 		bucket.tokens--
+		bucket.seen = now
+	}
+	if shared {
+		limiter.overflow = bucket
+	} else {
 		limiter.buckets[key] = bucket
+	}
+	if allowed {
 		return true, 0
 	}
-
-	limiter.buckets[key] = bucket
 	retryAfter := time.Duration(math.Ceil((1 - bucket.tokens) * float64(limiter.window) / float64(limiter.requests)))
 	return false, max(retryAfter, time.Nanosecond)
 }

@@ -109,7 +109,7 @@ func TestMutationLimitsAndCommitBoundary(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if err := current.Set("partial", "must not persist"); err != nil {
+		if err := current.Set("partial", "must persist"); err != nil {
 			return err
 		}
 		oversizedErr = current.Set("large", strings.Repeat("x", session.MaxCookieBytes))
@@ -129,9 +129,27 @@ func TestMutationLimitsAndCommitBoundary(t *testing.T) {
 
 	response := httptest.NewRecorder()
 	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/oversized", nil))
-	if response.Code != http.StatusInternalServerError || !errors.Is(oversizedErr, session.ErrTooLarge) || len(response.Header().Values("Set-Cookie")) != 0 {
+	if response.Code != http.StatusInternalServerError || !errors.Is(oversizedErr, session.ErrTooLarge) || len(response.Result().Cookies()) != 1 {
 		t.Fatalf("oversized: status=%d error=%v cookies=%#v", response.Code, oversizedErr, response.Header().Values("Set-Cookie"))
 	}
+	check := vial.New()
+	check.Use(manager.Middleware())
+	check.Get("/", func(context *vial.Context) error {
+		current, err := manager.From(context)
+		if err != nil {
+			return err
+		}
+		if value, _ := current.Get("partial"); value != "must persist" {
+			t.Errorf("valid mutation lost: %q", value)
+		}
+		if _, ok := current.Get("large"); ok {
+			t.Error("rejected mutation persisted")
+		}
+		return nil
+	})
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(response.Result().Cookies()[0])
+	check.ServeHTTP(httptest.NewRecorder(), request)
 	response = httptest.NewRecorder()
 	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/committed", nil))
 	if response.Code != http.StatusNoContent || !errors.Is(committedErr, session.ErrCommitted) || len(response.Header().Values("Set-Cookie")) != 0 {

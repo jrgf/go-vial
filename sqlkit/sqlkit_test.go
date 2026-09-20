@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 var (
@@ -134,6 +135,8 @@ func TestSQLKit(t *testing.T) {
 
 type testStore struct {
 	mu         sync.Mutex
+	lock       chan struct{}
+	queryDelay time.Duration
 	applied    map[string]string
 	statements []string
 	commits    int
@@ -171,6 +174,18 @@ func (connection *testConnection) ExecContext(ctx context.Context, query string,
 	if strings.TrimSpace(query) == "FAIL" {
 		return nil, errors.New("migration failed")
 	}
+	if strings.HasPrefix(query, "SELECT pg_advisory_lock(") {
+		select {
+		case connection.store.lock <- struct{}{}:
+			return driver.RowsAffected(1), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if strings.HasPrefix(query, "SELECT pg_advisory_unlock(") || strings.HasPrefix(query, "SELECT RELEASE_LOCK(") {
+		<-connection.store.lock
+		return driver.RowsAffected(1), nil
+	}
 	if strings.HasPrefix(strings.TrimSpace(query), "CREATE TABLE IF NOT EXISTS vial_schema_migrations") {
 		return driver.RowsAffected(0), nil
 	}
@@ -188,6 +203,14 @@ func (connection *testConnection) QueryContext(ctx context.Context, query string
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(query, "SELECT GET_LOCK(") {
+		select {
+		case connection.store.lock <- struct{}{}:
+			return &testRows{columns: []string{"lock"}, values: [][]driver.Value{{int64(1)}}}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if strings.TrimSpace(query) != selectMigrations {
 		return nil, fmt.Errorf("unexpected query %q", query)
 	}
@@ -202,6 +225,9 @@ func (connection *testConnection) QueryContext(ctx context.Context, query string
 		values = append(values, []driver.Value{version, connection.store.applied[version]})
 	}
 	connection.store.mu.Unlock()
+	if connection.store.queryDelay > 0 {
+		time.Sleep(connection.store.queryDelay)
+	}
 	return &testRows{values: values}, nil
 }
 
@@ -233,12 +259,18 @@ func (transaction *testTransaction) Rollback() error {
 }
 
 type testRows struct {
-	values [][]driver.Value
-	index  int
+	columns []string
+	values  [][]driver.Value
+	index   int
 }
 
-func (rows *testRows) Columns() []string { return []string{"version", "checksum"} }
-func (rows *testRows) Close() error      { return nil }
+func (rows *testRows) Columns() []string {
+	if rows.columns != nil {
+		return rows.columns
+	}
+	return []string{"version", "checksum"}
+}
+func (rows *testRows) Close() error { return nil }
 func (rows *testRows) Next(destination []driver.Value) error {
 	if rows.index >= len(rows.values) {
 		return io.EOF
@@ -250,7 +282,7 @@ func (rows *testRows) Next(destination []driver.Value) error {
 
 func newTestDatabase(t *testing.T) (*sql.DB, *testStore) {
 	t.Helper()
-	store := &testStore{applied: make(map[string]string)}
+	store := &testStore{applied: make(map[string]string), lock: make(chan struct{}, 1)}
 	name := fmt.Sprintf("vial_sqlkit_test_%d", testDriverSequence.Add(1))
 	sql.Register(name, &testDriver{store: store})
 	database, err := sql.Open(name, "")

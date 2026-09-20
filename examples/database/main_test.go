@@ -18,7 +18,7 @@ func TestDatabaseExample(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := testkit.Start(t, app)
-	server.Do(server.NewRequest(http.MethodGet, "/ready", nil)).RequireStatus(http.StatusOK)
+	server.Do(server.NewRequest(http.MethodGet, "/ready", nil)).RequireStatus(http.StatusNoContent)
 	response := server.JSON(http.MethodPost, "/notes", createNoteRequest{Body: "transactional note"})
 	response.RequireStatus(http.StatusCreated)
 	var created note

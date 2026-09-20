@@ -287,7 +287,8 @@ func (app *App) Build() error {
 			requestContext := context.WithValue(contextValue.request.Context(), requestContextKey{}, contextValue)
 			contextValue.request = contextValue.request.WithContext(requestContext)
 		}
-		if err := routeMiss(mux, contextValue.request); err != nil {
+		handler, pattern := contextValue.match.resolve(mux, contextValue.request)
+		if err := routeMiss(handler, pattern, contextValue.request); err != nil {
 			return err
 		}
 		mux.ServeHTTP(contextValue.Response(), contextValue.request)
@@ -298,7 +299,7 @@ func (app *App) Build() error {
 	app.compiledRoot = compiled
 	if len(app.middleware) > 0 {
 		app.compiledRoot = func(contextValue *Context) error {
-			_, pattern := mux.Handler(contextValue.request)
+			_, pattern := contextValue.match.resolve(mux, contextValue.request)
 			if route, ok := matchedRoutes[pattern]; ok {
 				matched := route
 				contextValue.route = &matched
@@ -344,8 +345,7 @@ func safeMuxHandle(mux *http.ServeMux, pattern string, handler http.Handler) (er
 	return nil
 }
 
-func routeMiss(mux *http.ServeMux, request *http.Request) *HTTPError {
-	handler, pattern := mux.Handler(request)
+func routeMiss(handler http.Handler, pattern string, request *http.Request) *HTTPError {
 	if pattern != "" {
 		return nil
 	}
@@ -381,9 +381,23 @@ func (app *App) serveHTTP(writer http.ResponseWriter, request *http.Request) {
 	response := newResponseWriter(writer)
 	contextValue := newContext(app, response, request)
 	defer contextValue.cleanup()
-	defer contextValue.finishResponse()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			contextValue.responseErr = fmt.Errorf("panic: %v", recovered)
+			if !response.Committed() {
+				response.status = http.StatusInternalServerError
+			}
+			contextValue.finishResponse()
+			panic(recovered)
+		}
+		contextValue.finishResponse()
+	}()
 	if err := root(contextValue); err != nil {
+		contextValue.responseErr = err
 		applyHTTPErrorHeaders(contextValue, err)
 		renderErrorSafely(contextValue, err, errorHandler)
+	}
+	if !response.Committed() && !response.hijacked {
+		response.WriteHeader(http.StatusOK)
 	}
 }

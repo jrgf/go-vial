@@ -1,18 +1,9 @@
 package session
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -39,37 +30,6 @@ var (
 	ErrTooLarge = errors.New("session: cookie exceeds 4096 bytes")
 )
 
-// Config controls cookie security, scope, lifetime, and encryption keys.
-// Keys are ordered newest first; each key must contain at least 32 random bytes.
-type Config struct {
-	Keys [][]byte
-
-	Name     string
-	Path     string
-	Domain   string
-	MaxAge   time.Duration
-	SameSite http.SameSite
-
-	// DangerouslyAllowInsecureCookies disables the Secure attribute for local
-	// HTTP development. Production applications should leave it false.
-	DangerouslyAllowInsecureCookies bool
-}
-
-// Manager loads and persists request sessions.
-type Manager struct {
-	mu   sync.RWMutex
-	keys [][]byte
-
-	name     string
-	path     string
-	domain   string
-	maxAge   time.Duration
-	sameSite http.SameSite
-	secure   bool
-	valueKey *vial.ValueKey[*Session]
-	now      func() time.Time
-}
-
 type payload struct {
 	IssuedAt int64             `json:"i"`
 	Values   map[string]string `json:"v,omitempty"`
@@ -87,139 +47,48 @@ type Session struct {
 	pending string
 }
 
-// New validates config and creates a session manager.
-func New(config Config) (*Manager, error) {
-	secure := !config.DangerouslyAllowInsecureCookies
-	name := strings.TrimSpace(config.Name)
-	if name == "" {
-		if secure {
-			name = defaultSecureName
-		} else {
-			name = defaultInsecureName
-		}
-	}
-	path := config.Path
-	if path == "" {
-		path = "/"
-	}
-	if !strings.HasPrefix(path, "/") {
-		return nil, errors.New("session: cookie path must start with /")
-	}
-	maxAge := config.MaxAge
-	if maxAge == 0 {
-		maxAge = defaultMaxAge
-	}
-	seconds := int64(maxAge / time.Second)
-	if maxAge < time.Second || maxAge%time.Second != 0 || seconds > int64(^uint(0)>>1) {
-		return nil, errors.New("session: MaxAge must fit a positive whole number of seconds")
-	}
-	sameSite := config.SameSite
-	if sameSite == 0 {
-		sameSite = http.SameSiteLaxMode
-	}
-	switch sameSite {
-	case http.SameSiteLaxMode, http.SameSiteStrictMode, http.SameSiteNoneMode:
-	default:
-		return nil, errors.New("session: SameSite must be Lax, Strict, or None")
-	}
-	if sameSite == http.SameSiteNoneMode && !secure {
-		return nil, errors.New("session: SameSite=None requires secure cookies")
-	}
-	if strings.HasPrefix(name, "__Host-") && (!secure || path != "/" || config.Domain != "") {
-		return nil, errors.New("session: __Host- cookies require Secure, Path=/, and no Domain")
-	}
-	if strings.HasPrefix(name, "__Secure-") && !secure {
-		return nil, errors.New("session: __Secure- cookies require Secure")
-	}
-
-	manager := &Manager{
-		name:     name,
-		path:     path,
-		domain:   config.Domain,
-		maxAge:   maxAge,
-		sameSite: sameSite,
-		secure:   secure,
-		valueKey: vial.NewValueKey[*Session]("session"),
-		now:      time.Now,
-	}
-	if err := manager.cookie("probe", int(seconds), time.Now().Add(maxAge)).Valid(); err != nil {
-		return nil, fmt.Errorf("session: invalid cookie configuration: %w", err)
-	}
-	if err := manager.ReplaceKeys(config.Keys...); err != nil {
-		return nil, err
-	}
-	return manager, nil
-}
-
-// CookieName returns the configured session cookie name.
-func (manager *Manager) CookieName() string {
-	return manager.name
-}
-
-// ReplaceKeys atomically replaces the encryption keys. New cookies use the
-// first key and existing cookies may use any listed key.
-func (manager *Manager) ReplaceKeys(keys ...[]byte) error {
-	if len(keys) == 0 {
-		return errors.New("session: at least one key is required")
-	}
-	derived := make([][]byte, 0, len(keys))
-	for index, key := range keys {
-		if len(key) < 32 {
-			return fmt.Errorf("session: key %d must contain at least 32 bytes", index)
-		}
-		derived = append(derived, deriveKey(key))
-	}
-	manager.mu.Lock()
-	manager.keys = derived
-	manager.mu.Unlock()
-	return nil
-}
-
 // Middleware loads one session and makes it available through Manager.From.
 func (manager *Manager) Middleware() vial.Middleware {
 	return func(next vial.Handler) vial.Handler {
 		return func(context *vial.Context) error {
-			current := &Session{
-				manager: manager,
-				context: context,
-				data:    newPayload(),
-			}
-			cookie, err := context.Request().Cookie(manager.name)
-			switch {
-			case errors.Is(err, http.ErrNoCookie):
-			case err != nil:
-				return fmt.Errorf("session: read cookie: %w", err)
-			default:
-				decoded, keyIndex, ok := newPayload(), -1, false
-				if len(cookie.Value) <= MaxCookieBytes {
-					decoded, keyIndex, ok = manager.decode(cookie.Value)
-				}
-				if !ok {
-					current.pending = manager.expiredCookie().String()
-				} else {
-					current.data = decoded
-					if keyIndex > 0 {
-						current.pending, err = manager.encodedCookie(decoded)
-						if err != nil {
-							return err
-						}
-					}
-				}
-			}
-			if err := context.BeforeCommit(current.beforeCommit); err != nil {
+			current, err := manager.load(context)
+			if err != nil {
 				return err
 			}
-			manager.valueKey.Set(context, current)
-			initialPending := current.pending
-			handlerErr := next(context)
-			if handlerErr != nil && !context.Committed() {
-				current.mu.Lock()
-				current.pending = initialPending
-				current.mu.Unlock()
+			if err := context.BeforeCommit(current.beforeCommit); err != nil {
+				return fmt.Errorf("session: register cookie: %w", err)
 			}
-			return handlerErr
+			manager.valueKey.Set(context, current)
+			return next(context)
 		}
 	}
+}
+
+func (manager *Manager) load(context *vial.Context) (*Session, error) {
+	current := &Session{manager: manager, context: context, data: newPayload()}
+	cookie, err := context.Request().Cookie(manager.name)
+	if errors.Is(err, http.ErrNoCookie) {
+		return current, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("session: read cookie: %w", err)
+	}
+	decoded, keyIndex, ok := newPayload(), -1, false
+	if len(cookie.Value) <= MaxCookieBytes {
+		decoded, keyIndex, ok = manager.decode(cookie.Value)
+	}
+	if !ok {
+		current.pending = manager.expiredCookie().String()
+		return current, nil
+	}
+	current.data = decoded
+	if keyIndex > 0 {
+		current.pending, err = manager.encodedCookie(decoded)
+		if err != nil {
+			return nil, fmt.Errorf("session: rotate cookie: %w", err)
+		}
+	}
+	return current, nil
 }
 
 // From returns the request session installed by Manager.Middleware.
@@ -320,6 +189,9 @@ func (session *Session) change(change func(*payload) bool) error {
 	if !change(&candidate) {
 		return nil
 	}
+	if candidate.IssuedAt == 0 {
+		candidate.IssuedAt = session.manager.now().Unix()
+	}
 	pending, err := session.manager.encodedCookie(candidate)
 	if err != nil {
 		return err
@@ -346,116 +218,6 @@ func (session *Session) beforeCommit(header http.Header) {
 	if pending != "" {
 		header.Add("Set-Cookie", pending)
 	}
-}
-
-func (manager *Manager) decode(value string) (payload, int, bool) {
-	encoded, err := base64.RawURLEncoding.DecodeString(value)
-	if err != nil || len(encoded) == 0 || encoded[0] != formatVersion {
-		return newPayload(), -1, false
-	}
-	for index, key := range manager.currentKeys() {
-		aead, err := newAEAD(key)
-		if err != nil || len(encoded) < 1+aead.NonceSize()+aead.Overhead() {
-			continue
-		}
-		nonce := encoded[1 : 1+aead.NonceSize()]
-		ciphertext := encoded[1+aead.NonceSize():]
-		plaintext, err := aead.Open(nil, nonce, ciphertext, []byte(manager.name))
-		if err != nil {
-			continue
-		}
-		decoded := newPayload()
-		if err := json.Unmarshal(plaintext, &decoded); err != nil {
-			continue
-		}
-		now := manager.now().Unix()
-		if decoded.IssuedAt <= 0 || decoded.IssuedAt > now+clockSkewSeconds || decoded.IssuedAt < now-int64(manager.maxAge/time.Second) {
-			continue
-		}
-		if decoded.Values == nil {
-			decoded.Values = make(map[string]string)
-		}
-		return decoded, index, true
-	}
-	return newPayload(), -1, false
-}
-
-func (manager *Manager) encodedCookie(data payload) (string, error) {
-	if len(data.Values) == 0 && len(data.Flashes) == 0 {
-		return manager.expiredCookie().String(), nil
-	}
-	now := manager.now()
-	data.IssuedAt = now.Unix()
-	plaintext, err := json.Marshal(data)
-	if err != nil {
-		return "", fmt.Errorf("session: encode cookie: %w", err)
-	}
-	keys := manager.currentKeys()
-	aead, err := newAEAD(keys[0])
-	if err != nil {
-		return "", fmt.Errorf("session: initialize encryption: %w", err)
-	}
-	nonce := make([]byte, aead.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", fmt.Errorf("session: generate nonce: %w", err)
-	}
-	encoded := make([]byte, 1, 1+len(nonce)+len(plaintext)+aead.Overhead())
-	encoded[0] = formatVersion
-	encoded = append(encoded, nonce...)
-	encoded = aead.Seal(encoded, nonce, plaintext, []byte(manager.name))
-	value := base64.RawURLEncoding.EncodeToString(encoded)
-	cookie := manager.cookie(
-		value,
-		int(manager.maxAge/time.Second),
-		now.Add(manager.maxAge),
-	)
-	serialized := cookie.String()
-	if serialized == "" {
-		return "", errors.New("session: invalid cookie")
-	}
-	if len(serialized) > MaxCookieBytes {
-		return "", ErrTooLarge
-	}
-	return serialized, nil
-}
-
-func (manager *Manager) expiredCookie() *http.Cookie {
-	return manager.cookie("", -1, time.Unix(1, 0))
-}
-
-func (manager *Manager) cookie(value string, maxAge int, expires time.Time) *http.Cookie {
-	return &http.Cookie{
-		Name:     manager.name,
-		Value:    value,
-		Path:     manager.path,
-		Domain:   manager.domain,
-		Expires:  expires,
-		MaxAge:   maxAge,
-		Secure:   manager.secure,
-		HttpOnly: true,
-		SameSite: manager.sameSite,
-	}
-}
-
-func (manager *Manager) currentKeys() [][]byte {
-	manager.mu.RLock()
-	keys := append([][]byte(nil), manager.keys...)
-	manager.mu.RUnlock()
-	return keys
-}
-
-func deriveKey(secret []byte) []byte {
-	mac := hmac.New(sha256.New, secret)
-	_, _ = mac.Write([]byte("go-vial/session/v1/encryption"))
-	return mac.Sum(nil)
-}
-
-func newAEAD(key []byte) (cipher.AEAD, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(block)
 }
 
 func newPayload() payload {

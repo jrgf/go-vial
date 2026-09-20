@@ -89,9 +89,20 @@ func (module *Module) Server() *grpc.Server { return module.server }
 
 // Register mounts the gRPC handler and registers its shutdown task.
 func (module *Module) Register(registrar *vial.Registrar) error {
-	registrar.HandleHTTP(module.pattern, module.server)
+	registrar.HandleHTTP(module.pattern, http.HandlerFunc(module.serveHTTP))
 	registrar.Go("shutdown", module.shutdown)
 	return nil
+}
+
+func (module *Module) serveHTTP(writer http.ResponseWriter, request *http.Request) {
+	controller := http.NewResponseController(writer)
+	for _, clear := range []func(time.Time) error{controller.SetReadDeadline, controller.SetWriteDeadline} {
+		if err := clear(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			http.Error(writer, "gRPC stream unavailable", http.StatusInternalServerError)
+			return
+		}
+	}
+	module.server.ServeHTTP(writer, request)
 }
 
 func (module *Module) shutdown(contextValue context.Context) error {

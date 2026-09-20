@@ -15,6 +15,9 @@ func Logger() vial.Middleware {
 			started := time.Now()
 			var requestErr error
 			if err := context.AfterResponse(func() {
+				if err := context.ResponseError(); err != nil {
+					requestErr = err
+				}
 				status := context.Status()
 				attributes := []any{
 					"method", context.Request().Method,
@@ -33,7 +36,7 @@ func Logger() vial.Middleware {
 
 				level := slog.LevelInfo
 				switch {
-				case status >= http.StatusInternalServerError:
+				case status >= http.StatusInternalServerError || requestErr != nil && status < http.StatusBadRequest:
 					level = slog.LevelError
 				case status >= http.StatusBadRequest:
 					level = slog.LevelWarn

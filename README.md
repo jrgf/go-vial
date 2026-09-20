@@ -11,6 +11,12 @@ still work with standard handlers, middleware, contexts, response writers, and
 `httptest`. The core HTTP package uses only the standard library; optional
 batteries may use focused dependencies.
 
+`vialgrpc` and `vialws` are separate Go modules with unchanged import paths.
+Add the module you use with `go get github.com/jrgf/go-vial/vialgrpc` or
+`go get github.com/jrgf/go-vial/vialws`. Core-only applications do not download
+their gRPC, protobuf, WebSocket, or `x/net` dependencies. `make check` validates
+the core and both integration modules.
+
 ## Capabilities
 
 - Error-returning handlers: `func(*vial.Context) error`
@@ -323,6 +329,11 @@ the longest configured session lifetime.
 but remain client-side and limited to one cookie. `SameSite` is defense in
 depth, not a replacement for CSRF protection.
 
+`session.Config.MaxAge` is an absolute lifetime from the first successful
+mutation. Later writes and key rotation retain that expiry. Successful session
+mutations, including `Destroy`, persist on error responses too. An empty handler
+response still commits its pending cookie.
+
 ## Authentication and authorization
 
 The [`auth`](auth) package resolves an optional identity once per request and
@@ -365,7 +376,11 @@ app.Readiness("/ready", db.PingContext)
 
 `sqlkit.InTx` commits on success and rolls back on errors or panics. `Migrator`
 applies sorted `.sql` files once, stores SHA-256 checksums, and rejects edited
-history. See the runnable
+history. Migration runs hold a database session lock on the connection that
+executes the files. PostgreSQL is the default; pass `sqlkit.MySQL` as the fourth
+argument to `NewMigrator` for MySQL. Other database engines need a migration tool
+with matching lock support. MySQL DDL can commit implicitly, so a failed DDL
+script may still require manual repair. See the runnable
 [`examples/database`](examples/database) PostgreSQL application.
 
 ## OpenAPI 3.1
@@ -373,6 +388,10 @@ history. See the runnable
 The [`openapi`](openapi) package generates deterministic OpenAPI 3.1 JSON from
 `App.Routes`, `RouteName`, and Go request and response types. It understands
 Vial's `path`, `query`, `header`, `cookie`, `form`, and `json` binding tags.
+
+When exact and catch-all ServeMux routes share an OpenAPI path and method,
+the exact route is the main operation. Other routes are retained under
+`x-vial-alternatives`, each with its original `x-vial-pattern`.
 
 ```go
 err := openapi.Mount(app, "/openapi.json", openapi.Config{

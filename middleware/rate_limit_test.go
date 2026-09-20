@@ -87,8 +87,14 @@ func TestRateLimiterRefillCleanupAndCapacity(t *testing.T) {
 	if allowed, retry := limiter.allow("first", now); allowed || retry != 30*time.Second {
 		t.Fatalf("second request: allowed=%v retry=%v", allowed, retry)
 	}
-	if allowed, _ := limiter.allow("second", now); allowed {
+	if allowed, _ := limiter.allow("second", now); !allowed {
+		t.Fatal("overflow bucket rejected first request")
+	}
+	if len(limiter.buckets) != 1 {
 		t.Fatal("new key exceeded capacity")
+	}
+	if allowed, _ := limiter.allow("third", now); allowed {
+		t.Fatal("overflow bucket did not limit new keys")
 	}
 	if allowed, _ := limiter.allow("first", now.Add(30*time.Second)); !allowed {
 		t.Fatal("refilled request was denied")
