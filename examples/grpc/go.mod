@@ -3,7 +3,7 @@ module github.com/jrgf/go-vial/examples/grpc
 go 1.26.6
 
 require (
-	github.com/jrgf/go-vial v1.0.0-rc.1
+	github.com/jrgf/go-vial v1.0.0-rc.2
 	github.com/jrgf/go-vial/vialgrpc v0.0.0
 	google.golang.org/grpc v1.83.2
 )

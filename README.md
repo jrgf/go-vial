@@ -76,7 +76,7 @@ the core and both integration modules.
 
 ## Project status
 
-Vial 1.0.0-rc.1 is a release candidate. Its public API is frozen except for
+Vial 1.0.0-rc.2 is a release candidate. Its public API is frozen except for
 correctness and security fixes; stable 1.0 still requires downstream validation
 and production burn-in. Vial began as a learning project and accepts
 AI-assisted contributions. Those changes go

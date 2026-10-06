@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.0.0-rc.2
+Exceptions to the release-candidate API freeze:
+- Move `vialgrpc` and `vialws` into separate Go modules so core-only
+  applications no longer download grpc-go or coder/websocket. They are tagged
+  in lockstep with the core module and require the same core version. Upgrade
+  with `go get github.com/jrgf/go-vial/vialgrpc@v1.0.0-rc.2` or
+  `go get github.com/jrgf/go-vial/vialws@v1.0.0-rc.2`.
+- Add `sqlkit.Dialect` with `PostgreSQL` (default) and `MySQL`. `NewMigrator`
+  accepts an optional dialect and serializes migration runs across processes
+  with a database session lock.
+- Add `Context.ResponseError` to read the handler error or escaping panic in
+  `AfterResponse` hooks.
+
+Fixes:
+- Let exact and catch-all routes coexist, and invalidate cached route matches
+  when middleware rewrites the method or path.
+- Keep informational responses from committing the response, and run
+  pre-commit hooks once when a wrapped writer is flushed or finalized.
+- Persist session mutations on empty and error responses, and keep the
+  absolute session lifetime from being extended by writes or key rotation.
+- Group IPv6 clients by /64 in the rate limiter, and share one overflow bucket
+  at `MaxKeys` instead of rejecting every new key.
+- Record unrecovered panics as status 500 in request logs and HTTP metrics,
+  and name the OpenMetrics request counter family `vial_http_requests`.
+- Release the migration lock on cancellation and failure without returning a
+  possibly locked connection to the pool.
+- Keep idle HTTP/2 SSE streams and gRPC streams open past server write
+  deadlines and HTTP timeouts.
+- Time out CLI application inspection, reject malformed inspection paths, and
+  normalize native path separators in the `vial dev` watcher.
+
 ## 1.0.0-rc.1
 - Add `App.URL` for named-route paths with group prefixes, escaped parameters,
   and wildcard validation, using the existing index built during registration.
@@ -44,7 +75,6 @@
 - Add bounded SSE fan-out with isolated topics, lifecycle-aware coder/websocket
   handlers, and a grpc-go module with message limits and bounded graceful
   shutdown.
-- Correctness issues fixed
 
 ## 0.18.0
 - gRPC,SSE,Websockets examples

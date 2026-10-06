@@ -41,6 +41,13 @@ jobs:
             exit 1
           fi
           tag="v$version"
+          for module in vialgrpc vialws; do
+            required="$(cd "$module" && go list -m -f '{{.Version}}' github.com/jrgf/go-vial)"
+            if [[ "$required" != "$tag" ]]; then
+              echo "$module requires github.com/jrgf/go-vial $required, want $tag" >&2
+              exit 1
+            fi
+          done
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           if gh release view "$tag" >/dev/null 2>&1; then
@@ -114,5 +121,10 @@ jobs:
           if [[ "${TAG%%+*}" == *-* ]]; then
             flags+=(--prerelease --latest=false)
           fi
+          # Integration modules are versioned in lockstep with the root module.
+          for module in vialgrpc vialws; do
+            git tag -f "$module/$TAG" "$TARGET"
+          done
+          git push origin "vialgrpc/$TAG" "vialws/$TAG"
           gh release create "$TAG" dist/* \
             --target "$TARGET" --title "Vial $TAG" --generate-notes "${flags[@]}"
